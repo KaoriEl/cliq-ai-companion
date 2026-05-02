@@ -94,5 +94,15 @@
             description="Discard all of Cliq's proposed changes and close the review">
             <keyboard-shortcut keymap="$default" first-keystroke="alt BACK_SPACE"/>
         </action>
+
+        <!-- Insert @-tokens for selected Project View / editor files into the active terminal prompt. -->
+        <action
+            id="com.cliq.plugin.InsertFilesAsContext"
+            class="com.cliq.plugin.actions.InsertFilesAsContextAction"
+            text="Cliq: Send Files as @-Context to Terminal"
+            description="Inserts @relative/path tokens for the selected files into the active terminal session">
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="shift B"/>
+        </action>
     </actions>
 </idea-plugin>
