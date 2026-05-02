@@ -1,0 +1,60 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Plugin Development
+.intellijPlatform/
+/bin/
+
+# Kotlin
+/lib/
+kotlin-js-store/
+
+# Local configuration & Secrets
+local.properties
+.env
+
+# Log files
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ----------------------------------------------------------------------
+# Project Specific (Local scripts, AI context, Temp binaries)
+# ----------------------------------------------------------------------
+
+# Shell scripts
+*.sh
+
+# AI context and generated dumps
+ai_context/
+*_context.txt
+
+# Reference projects
+reference/
+
+# Temp binaries or executable files without extensions
+A
+Compilation
+Get
+Run
+Task
+
+# AI specific documentation (remove from here if they are public docs)
+DocGeminiCli.md
+GEMINI.md

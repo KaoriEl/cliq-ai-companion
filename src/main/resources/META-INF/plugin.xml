@@ -1,0 +1,98 @@
+<idea-plugin>
+    <id>com.cliq.plugin</id>
+    <name>Cliq AI Companion</name>
+    <vendor email="sagem3455@gmail.com">Cliq</vendor>
+
+    <description><![CDATA[
+        Cliq is a graphical companion for the Claude and Gemini command-line agents.
+        It exposes a tool window, a configurable launcher, and a settings page that
+        lets you specify which CLI binary to run for each agent. The plugin shells
+        out to the configured executables inside the IDE's integrated terminal so
+        you keep one workflow for editing and chatting.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>org.jetbrains.plugins.terminal</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Settings page lives under Settings | Tools | Cliq. -->
+        <applicationConfigurable
+            parentId="tools"
+            id="com.cliq.plugin.settings.CliqSettingsConfigurable"
+            instance="com.cliq.plugin.settings.CliqSettingsConfigurable"
+            displayName="Cliq"/>
+
+        <!-- Persistent application-level state for CLI executable paths. -->
+        <applicationService serviceImplementation="com.cliq.plugin.settings.CliqSettings"/>
+
+        <!-- Notification group used for welcome and error balloons. -->
+        <notificationGroup id="Cliq" displayType="BALLOON"/>
+
+        <!-- Tool window shown on the right; contents built by `CliqToolWindowFactory`. -->
+        <toolWindow
+            id="Cliq"
+            anchor="right"
+            icon="/icons/cliq.svg"
+            factoryClass="com.cliq.plugin.toolwindow.CliqToolWindowFactory"/>
+
+        <!-- Replaces deprecated `StartupActivity`; runs once per opened project. -->
+        <postStartupActivity implementation="com.cliq.plugin.startup.CliqStartupActivity"/>
+
+        <!-- Project-level services. -->
+        <projectService serviceImplementation="com.cliq.plugin.terminal.CliqTerminalLauncher"/>
+        <projectService serviceImplementation="com.cliq.plugin.context.OpenFilesTracker"/>
+        <projectService serviceImplementation="com.cliq.plugin.diff.CliqDiffManager"/>
+        <projectService serviceImplementation="com.cliq.plugin.mcp.CliqIdeServer"/>
+    </extensions>
+
+    <!-- Bridge between the IDE's integrated terminal and the Cliq IDE server:
+         injects GEMINI_CLI_IDE_* env vars so spawned CLIs autodiscover us. -->
+    <extensions defaultExtensionNs="org.jetbrains.plugins.terminal">
+        <localTerminalCustomizer implementation="com.cliq.plugin.terminal.CliqTerminalEnvCustomizer"/>
+    </extensions>
+
+    <actions>
+        <action
+            id="com.cliq.plugin.RunAgent"
+            class="com.cliq.plugin.actions.CliqAgentAction"
+            text="Run Cliq Agent"
+            description="Pick a configured Claude or Gemini CLI and launch it in the integrated terminal"
+            icon="/icons/cliq.svg">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="MainToolbarRight" anchor="last"/>
+            <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt Q"/>
+        </action>
+
+        <action
+            id="com.cliq.plugin.OpenSettings"
+            class="com.cliq.plugin.settings.OpenCliqSettingsAction"
+            text="Cliq Settings"
+            description="Open the Cliq settings page">
+            <add-to-group group-id="ToolsMenu" anchor="after" relative-to-action="com.cliq.plugin.RunAgent"/>
+        </action>
+
+        <action
+            id="com.cliq.plugin.ProposeDemoDiff"
+            class="com.cliq.plugin.actions.ProposeDemoDiffAction"
+            text="Cliq: Propose Demo Diff for Current File"
+            description="Open a Cliq review against the focused file (development helper)">
+            <add-to-group group-id="ToolsMenu" anchor="after" relative-to-action="com.cliq.plugin.OpenSettings"/>
+        </action>
+
+        <!-- Bound to the diff editor's floating toolbar. Visible only inside Cliq reviews. -->
+        <action
+            id="com.cliq.plugin.AcceptDiff"
+            class="com.cliq.plugin.diff.AcceptCliqDiffAction"
+            text="Accept All Changes"
+            description="Apply all of Cliq's proposed changes to the file">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt ENTER"/>
+        </action>
+        <action
+            id="com.cliq.plugin.RejectDiff"
+            class="com.cliq.plugin.diff.RejectCliqDiffAction"
+            text="Reject All Changes"
+            description="Discard all of Cliq's proposed changes and close the review">
+            <keyboard-shortcut keymap="$default" first-keystroke="alt BACK_SPACE"/>
+        </action>
+    </actions>
+</idea-plugin>
