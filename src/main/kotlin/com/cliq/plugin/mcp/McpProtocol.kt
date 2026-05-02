@@ -11,16 +11,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.encodeToJsonElement
 import kotlinx.serialization.json.put
 
-/**
- * Lean implementation of the Model Context Protocol payloads we need to
- * speak to the Gemini and Claude CLIs.
- *
- * The full MCP SDK is overkill for our scope (two tools, three notification
- * types). Building the JSON-RPC envelopes by hand keeps the dependency
- * graph small and avoids leaking ktor + the MCP SDK into the plugin classpath.
- *
- * Wire format reference: https://spec.modelcontextprotocol.io/specification/
- */
 @OptIn(ExperimentalSerializationApi::class)
 internal object McpJson {
     val codec: Json = Json {
@@ -33,11 +23,6 @@ internal object McpJson {
 @Serializable
 internal data class IdeInfo(val name: String, val displayName: String)
 
-/**
- * Payload written into the `${tmpdir}/gemini/ide/gemini-ide-server-PID-PORT.json`
- * discovery file. Gemini CLI scans these files (matched by its parent PID
- * walking the process tree) to locate a compatible IDE server.
- */
 @Serializable
 internal data class DiscoveryRecord(
     val port: Int,
@@ -47,7 +32,6 @@ internal data class DiscoveryRecord(
     val workspacePath: String,
 )
 
-/** Data the IDE pushes to the CLI describing the editor's currently open files. */
 @Serializable
 internal data class WorkspaceSnapshot(
     val workspaceState: WorkspaceStatePayload?,
@@ -71,10 +55,6 @@ internal data class OpenFilePayload(
 @Serializable
 internal data class CursorPayload(val line: Int, val character: Int)
 
-/**
- * Builders for JSON-RPC envelopes. Kept as plain string operations so the
- * server can write them straight to a `Writer` without intermediate parsing.
- */
 internal object JsonRpc {
     private const val VERSION = "2.0"
 
@@ -124,7 +104,6 @@ internal object JsonRpc {
     }
 }
 
-/** Static description of a tool exposed by the IDE to the CLI. */
 internal data class ToolDescriptor(
     val name: String,
     val description: String,

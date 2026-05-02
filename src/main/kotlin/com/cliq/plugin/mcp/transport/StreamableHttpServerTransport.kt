@@ -129,7 +129,6 @@ public class StreamableHttpServerTransport(
         activeStream.adapter.sendResponseHeaders(200, payloadBytes.size.toLong())
         activeStream.adapter.getResponseBody().use { it.write(payloadBytes) }
       } else {
-        // For SSE, we just close the stream now that all messages are sent.
         activeStream.writer?.close()
         streamsMapping.remove(streamId)
       }
@@ -194,7 +193,7 @@ public class StreamableHttpServerTransport(
 
       val hasRequest = messages.any { it is JSONRPCRequest }
       if (!hasRequest) {
-        adapter.sendResponseHeaders(202, -1) // 202 Accepted, no body
+        adapter.sendResponseHeaders(202, -1)
         adapter.close()
         messages.forEach { _onMessage(it) }
         return
@@ -204,7 +203,7 @@ public class StreamableHttpServerTransport(
       streamMutex.withLock {
         if (!enableJsonResponse) {
           adapter.appendSseHeaders(sessionId)
-          adapter.sendResponseHeaders(200, 0) // Important: 0 for chunked encoding, keeps connection open
+          adapter.sendResponseHeaders(200, 0)
           val writer = OutputStreamWriter(adapter.getResponseBody(), StandardCharsets.UTF_8)
           val sessionContext = SessionContext(adapter, writer)
           streamsMapping[streamId] = sessionContext
@@ -245,7 +244,7 @@ public class StreamableHttpServerTransport(
     }
 
     adapter.appendSseHeaders(sessionId)
-    adapter.sendResponseHeaders(200, 0) // Keep connection open
+    adapter.sendResponseHeaders(200, 0)
     val writer = OutputStreamWriter(adapter.getResponseBody(), StandardCharsets.UTF_8)
     val sessionContext = SessionContext(adapter, writer)
     streamsMapping[STANDALONE_SSE_STREAM_ID] = sessionContext
@@ -263,7 +262,7 @@ public class StreamableHttpServerTransport(
     if (!validateSession(adapter) || !validateProtocolVersion(adapter)) return
     sessionId?.let { onSessionClosed?.invoke(it) }
     close()
-    adapter.sendResponseHeaders(200, -1) // No body
+    adapter.sendResponseHeaders(200, -1)
     adapter.close()
   }
 

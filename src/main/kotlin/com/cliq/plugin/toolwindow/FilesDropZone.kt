@@ -22,11 +22,6 @@ import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.SwingConstants
 
-/**
- * Rounded dashed-border area that accepts file drops from the OS file manager
- * and from the IntelliJ Project View. Calls [onFilesDropped] with the
- * collected VirtualFiles whenever a drop succeeds.
- */
 class FilesDropZone(private val onFilesDropped: (List<VirtualFile>) -> Unit) : JPanel(BorderLayout()) {
 
     private var hovered = false
@@ -39,12 +34,8 @@ class FilesDropZone(private val onFilesDropped: (List<VirtualFile>) -> Unit) : J
 
     init {
         isOpaque = false
-        // Было empty(0, 12, 12, 12). Делаем равномерный отступ 12px со всех сторон внутри пунктира
         border = JBUI.Borders.empty(12)
-        preferredSize = Dimension(0, 160) // Слегка увеличим высоту для комфорта
-
-        // Отделяем текст от сплиттера снизу, чтобы не слипались
-        label.border = JBUI.Borders.emptyBottom(8)
+        preferredSize = Dimension(0, 160)
 
         add(label, BorderLayout.NORTH)
         DropTarget(this, DnDConstants.ACTION_COPY, Listener(), true)

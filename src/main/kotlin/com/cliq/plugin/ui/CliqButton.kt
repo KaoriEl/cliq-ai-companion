@@ -12,11 +12,6 @@ import java.awt.event.MouseEvent
 import javax.swing.BorderFactory
 import javax.swing.JButton
 
-/**
- * Flat, rounded, Cliq-styled button. Two variants:
- *  - PRIMARY: solid green background, white text (call to action)
- *  - GHOST:   transparent background, green text + green border
- */
 class CliqButton(text: String, private val variant: Variant = Variant.PRIMARY) : JButton(text) {
 
     enum class Variant { PRIMARY, GHOST }

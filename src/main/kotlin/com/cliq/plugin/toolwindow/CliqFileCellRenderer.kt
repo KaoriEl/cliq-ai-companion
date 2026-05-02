@@ -11,13 +11,12 @@ import javax.swing.*
 
 class CliqFileCellRenderer(
     private val basePath: String?,
-    private val isPinned: Boolean // Отличаем Recent от Pinned
+    private val isPinned: Boolean
 ) : JPanel(BorderLayout()), ListCellRenderer<VirtualFile> {
 
     private val nameLabel = JBLabel().apply { font = CliqTheme.captionFont(font) }
     private val actionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply { isOpaque = false }
     
-    // Используем стандартные иконки, но в будущем их можно заменить на кастомные SVG
     private val sendBtn = JLabel(AllIcons.Actions.Execute) 
     private val deleteBtn = JLabel(AllIcons.Actions.GC)
 
@@ -28,7 +27,7 @@ class CliqFileCellRenderer(
         add(actionsPanel, BorderLayout.EAST)
         
         actionsPanel.add(sendBtn)
-        if (isPinned) actionsPanel.add(deleteBtn) // В Recent корзины не будет
+        if (isPinned) actionsPanel.add(deleteBtn)
     }
 
     override fun getListCellRendererComponent(
@@ -39,7 +38,6 @@ class CliqFileCellRenderer(
         nameLabel.text = relPath
         nameLabel.icon = value.fileType.icon
         
-        // Цвета из дизайн-системы
         background = if (isSelected) CliqTheme.SURFACE_HOVER else CliqTheme.SURFACE
         nameLabel.foreground = if (isSelected) CliqTheme.PRIMARY_TEXT else CliqTheme.SECONDARY_TEXT
         

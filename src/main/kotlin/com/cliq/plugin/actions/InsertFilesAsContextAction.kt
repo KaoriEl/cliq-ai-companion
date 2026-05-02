@@ -10,11 +10,6 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.DumbAware
 
-/**
- * Converts the currently selected Project View files (or open editor files if
- * nothing is selected) into @-tokens and types them into the active terminal
- * prompt without appending a newline. Default shortcut: Shift+B.
- */
 class InsertFilesAsContextAction : AnAction(), DumbAware {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT

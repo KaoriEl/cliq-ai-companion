@@ -26,23 +26,6 @@ import com.intellij.util.messages.Topic
 import java.util.EventListener
 import java.util.concurrent.CopyOnWriteArrayList
 
-/**
- * Project-scoped service that mirrors the editor's open-files state into a
- * compact [WorkspaceContext] snapshot suitable for shipping to a CLI agent.
- *
- * Three signals are tracked:
- *   1. **File lifecycle** — open / close / rename / delete via the editor
- *      manager listener and VFS bulk listener.
- *   2. **Active file selection** — `selectionChanged` fires when the user
- *      switches editor tabs.
- *   3. **Cursor position and selected text** — caret/selection multicaster
- *      listeners attached to [EditorFactory], scoped to the active file only
- *      to avoid noise from background editors.
- *
- * All mutations are debounced (50 ms) before being broadcast on the message
- * bus, so a single user keystroke that triggers caret + selection events
- * yields a single `onContextChanged` notification.
- */
 @Service(Service.Level.PROJECT)
 class OpenFilesTracker(private val project: Project) : Disposable {
 
@@ -125,16 +108,10 @@ class OpenFilesTracker(private val project: Project) : Disposable {
             }
         })
 
-        // Seed with already-open files (e.g., the IDE was reopened with state).
         FileEditorManager.getInstance(project).selectedFiles.forEach { promote(it) }
         if (files.isNotEmpty()) scheduleNotify()
     }
 
-    /**
-     * Returns an immutable snapshot of the current workspace state. Safe to
-     * call from any thread; reads are consistent because we always mutate the
-     * underlying list on the EDT (via platform listeners) or pooled thread.
-     */
     fun snapshot(): WorkspaceContext = WorkspaceContext(
         openFiles = files.map { it.toImmutable() },
         isTrusted = project.isTrusted(),
@@ -151,9 +128,6 @@ class OpenFilesTracker(private val project: Project) : Disposable {
     private fun promote(file: VirtualFile): Boolean {
         if (!file.isInLocalFileSystem) return false
 
-        // Only one file is "active" at a time; clear cursor/selection on the
-        // previous one because those values are meaningless once it's
-        // backgrounded.
         files.firstOrNull { it.isActive }?.apply {
             isActive = false
             cursor = null
@@ -187,7 +161,6 @@ class OpenFilesTracker(private val project: Project) : Disposable {
     private fun truncate(text: String): String {
         if (text.length <= MAX_SELECTION_LENGTH) return text
         var cut = MAX_SELECTION_LENGTH
-        // Don't slice in the middle of a UTF-16 surrogate pair.
         if (cut > 0 && Character.isHighSurrogate(text[cut - 1])) cut--
         return text.take(cut) + "… [truncated]"
     }

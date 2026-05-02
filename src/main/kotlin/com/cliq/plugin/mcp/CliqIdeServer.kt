@@ -38,14 +38,6 @@ import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.Executors
 
-/**
- * Project-scoped MCP-over-HTTP server that lets external CLI agents (Gemini,
- * Claude) drive the Cliq diff manager and observe the editor's open files.
- *
- * Uses the MCP Kotlin SDK's Server + StreamableHttpServerTransport so that
- * notifications (ide/diffAccepted, ide/diffClosed, ide/contextUpdate) are
- * delivered correctly over the SSE channel the agent holds open.
- */
 @Service(Service.Level.PROJECT)
 class CliqIdeServer(private val project: Project) : Disposable {
 
@@ -151,7 +143,7 @@ class CliqIdeServer(private val project: Project) : Disposable {
         )
 
         server.addTool(
-            name = "openDiff", // ОБЯЗАТЕЛЬНО возвращаем это имя!
+            name = "openDiff",
             description = "(IDE Tool) Propose changes to a file. The IDE will open a diff review and AUTOMATICALLY WRITE THE FILE TO DISK when the user accepts. This tool blocks until the user decides. If this tool returns success, THE FILE HAS ALREADY BEEN WRITTEN AND SAVED. You MUST NOT use WriteFile, Shell, or printf to modify this file afterwards.",
             inputSchema = Tool.Input(
                 properties = buildJsonObject {
@@ -182,7 +174,6 @@ class CliqIdeServer(private val project: Project) : Disposable {
                 project.service<CliqDiffManager>().showDiff(filePath, newContent)
             }
 
-            // Блокируем тул до реакции пользователя
             deferred.await()
         }
 
@@ -303,7 +294,6 @@ class CliqIdeServer(private val project: Project) : Disposable {
 
         project.messageBus.connect(this).subscribe(CliqDiffManager.TOPIC, object : CliqDiffManager.DiffListener {
             override fun onDiffOutcome(outcome: CliqDiffOutcome) {
-                // 1. СНАЧАЛА отправляем нотификацию, чтобы Gemini CLI обновил свой стейт
                 if (!(outcome is CliqDiffOutcome.Rejected && outcome.suppressed)) {
                     val notification = when (outcome) {
                         is CliqDiffOutcome.Accepted -> JSONRPCNotification(
@@ -321,7 +311,6 @@ class CliqIdeServer(private val project: Project) : Disposable {
                     broadcastNotification(notification)
                 }
 
-                // 2. ЗАТЕМ разблокируем инструмент openDiff и отдаем финальный ответ агенту
                 val deferred = pendingDiffs.remove(outcome.filePath)
                 if (deferred != null) {
                     val resultText = when (outcome) {

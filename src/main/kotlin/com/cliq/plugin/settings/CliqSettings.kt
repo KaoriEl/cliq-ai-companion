@@ -9,14 +9,6 @@ import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
 import com.intellij.util.xmlb.XmlSerializerUtil
 
-/**
- * Application-level persistent settings for Cliq.
- *
- * The state is serialised to `cliq-settings.xml` inside the IDE config directory
- * via the standard `PersistentStateComponent` contract. Two CLI commands are
- * exposed: one for Claude, one for Gemini. Each may be a bare executable name
- * (resolved via `PATH`) or a full filesystem path.
- */
 @State(
     name = "CliqSettings",
     storages = [Storage("cliq-settings.xml")],
@@ -34,10 +26,6 @@ class CliqSettings : PersistentStateComponent<CliqSettings> {
         XmlSerializerUtil.copyBean(state, this)
     }
 
-    /**
-     * Returns the configured agents in the order they should be presented to the user.
-     * The list is rebuilt on every call so it always reflects the latest settings.
-     */
     fun agents(): List<Agent> = listOf(
         Agent(Agent.CLAUDE_ID, "Claude", claudeCommand.ifBlank { CliqPlugin.DEFAULT_CLAUDE_COMMAND }),
         Agent(Agent.GEMINI_ID, "Gemini", geminiCommand.ifBlank { CliqPlugin.DEFAULT_GEMINI_COMMAND }),

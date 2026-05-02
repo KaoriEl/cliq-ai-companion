@@ -4,10 +4,6 @@ import com.sun.net.httpserver.HttpExchange
 import java.io.InputStream
 import java.io.OutputStream
 
-/**
- * An adapter to provide a server-agnostic interface for handling HTTP requests,
- * wrapping the `com.sun.net.httpserver.HttpExchange` object.
- */
 class HttpExchangeAdapter(private val exchange: HttpExchange) {
 
   fun getRequestMethod(): String = exchange.requestMethod

@@ -8,13 +8,6 @@ import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
 import javax.swing.JComponent
 
-/**
- * UI for the Cliq settings page (Settings | Tools | Cliq).
- *
- * Built with the modern Kotlin UI DSL v2 (`panel { row { ... } }`) instead of
- * the older `FormBuilder`. Bindings keep the underlying [CliqSettings] in sync
- * via property references rather than ad-hoc field/state plumbing.
- */
 class CliqSettingsConfigurable : Configurable {
 
     private val settings = CliqSettings.getInstance()
