@@ -3,6 +3,7 @@ package com.cliq.plugin.toolwindow
 import com.cliq.plugin.ui.CliqTheme
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.Dimension
 import java.awt.Graphics
@@ -38,9 +39,14 @@ class FilesDropZone(private val onFilesDropped: (List<VirtualFile>) -> Unit) : J
 
     init {
         isOpaque = false
-        border = BorderFactory.createEmptyBorder(14, 12, 14, 12)
-        preferredSize = Dimension(0, 78)
-        add(label, BorderLayout.CENTER)
+        // Было empty(0, 12, 12, 12). Делаем равномерный отступ 12px со всех сторон внутри пунктира
+        border = JBUI.Borders.empty(12)
+        preferredSize = Dimension(0, 160) // Слегка увеличим высоту для комфорта
+
+        // Отделяем текст от сплиттера снизу, чтобы не слипались
+        label.border = JBUI.Borders.emptyBottom(8)
+
+        add(label, BorderLayout.NORTH)
         DropTarget(this, DnDConstants.ACTION_COPY, Listener(), true)
     }
 

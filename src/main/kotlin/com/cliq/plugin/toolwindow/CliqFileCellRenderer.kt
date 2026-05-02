@@ -1,0 +1,49 @@
+package com.cliq.plugin.toolwindow
+
+import com.cliq.plugin.ui.CliqTheme
+import com.cliq.plugin.util.PathUtil
+import com.intellij.icons.AllIcons
+import com.intellij.openapi.vfs.VirtualFile
+import com.intellij.ui.components.JBLabel
+import com.intellij.util.ui.JBUI
+import java.awt.*
+import javax.swing.*
+
+class CliqFileCellRenderer(
+    private val basePath: String?,
+    private val isPinned: Boolean // Отличаем Recent от Pinned
+) : JPanel(BorderLayout()), ListCellRenderer<VirtualFile> {
+
+    private val nameLabel = JBLabel().apply { font = CliqTheme.captionFont(font) }
+    private val actionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply { isOpaque = false }
+    
+    // Используем стандартные иконки, но в будущем их можно заменить на кастомные SVG
+    private val sendBtn = JLabel(AllIcons.Actions.Execute) 
+    private val deleteBtn = JLabel(AllIcons.Actions.GC)
+
+    init {
+        isOpaque = true
+        border = JBUI.Borders.empty(4, 8)
+        add(nameLabel, BorderLayout.CENTER)
+        add(actionsPanel, BorderLayout.EAST)
+        
+        actionsPanel.add(sendBtn)
+        if (isPinned) actionsPanel.add(deleteBtn) // В Recent корзины не будет
+    }
+
+    override fun getListCellRendererComponent(
+        list: JList<out VirtualFile>, value: VirtualFile, index: Int,
+        isSelected: Boolean, cellHasFocus: Boolean
+    ): Component {
+        val relPath = PathUtil.toRelativePosix(basePath, value.path) ?: value.name
+        nameLabel.text = relPath
+        nameLabel.icon = value.fileType.icon
+        
+        // Цвета из дизайн-системы
+        background = if (isSelected) CliqTheme.SURFACE_HOVER else CliqTheme.SURFACE
+        nameLabel.foreground = if (isSelected) CliqTheme.PRIMARY_TEXT else CliqTheme.SECONDARY_TEXT
+        
+        actionsPanel.isVisible = isSelected
+        return this
+    }
+}
