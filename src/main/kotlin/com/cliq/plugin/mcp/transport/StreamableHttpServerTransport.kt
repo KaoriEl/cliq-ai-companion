@@ -110,7 +110,7 @@ public class StreamableHttpServerTransport(
     requestToResponseMapping[requestId] = message
     val relatedIds = requestToStreamMapping.filterValues { it == streamId }.keys
 
-    val allResponseReady = relatedIds.all { it in requestToResponseMapping }
+    val allResponseReady = relatedIds.all { requestToResponseMapping.containsKey(it) }
     if (!allResponseReady) return
 
     streamMutex.withLock {
@@ -242,7 +242,7 @@ public class StreamableHttpServerTransport(
 
     if (!validateSession(adapter) || !validateProtocolVersion(adapter)) return
 
-    if (STANDALONE_SSE_STREAM_ID in streamsMapping) {
+    if (streamsMapping.containsKey(STANDALONE_SSE_STREAM_ID)) {
       reject(adapter, 409, ErrorCode.Unknown(-32000), "Conflict: Only one SSE stream is allowed per session")
       return
     }
