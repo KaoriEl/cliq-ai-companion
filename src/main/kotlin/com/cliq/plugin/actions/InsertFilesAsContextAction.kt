@@ -1,6 +1,7 @@
 package com.cliq.plugin.actions
 
 import com.cliq.plugin.terminal.TerminalTyper
+import com.cliq.plugin.util.CliPathEscaper
 import com.cliq.plugin.util.PathUtil
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
@@ -39,8 +40,7 @@ class InsertFilesAsContextAction : AnAction(), DumbAware {
         val tokens = files
             .filter { it.isValid }
             .mapNotNull { PathUtil.toRelativePosix(basePath, it.path) }
-            .filter { it.isNotBlank() }
-            .joinToString(" ") { "@$it" }
+            .joinToString(" ") { "@${CliPathEscaper.escape(it)}" }
 
         if (tokens.isBlank()) return
         TerminalTyper.typeInActiveTerminal(project, "$tokens ")
