@@ -58,3 +58,4 @@ Task
 # AI specific documentation (remove from here if they are public docs)
 DocGeminiCli.md
 GEMINI.md
+.kotlin
