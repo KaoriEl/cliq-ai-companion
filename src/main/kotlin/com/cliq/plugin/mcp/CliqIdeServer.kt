@@ -56,6 +56,7 @@ class CliqIdeServer(private val project: Project) : Disposable {
     private val keepAliveJobs = mutableMapOf<String, Job>()
     private val mcpServer = createMcpServer()
     private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val pendingDiffs = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<CallToolResult>>()
 
     @Volatile private var server: HttpServer? = null
     @Volatile private var boundPort: Int? = null
@@ -150,8 +151,8 @@ class CliqIdeServer(private val project: Project) : Disposable {
         )
 
         server.addTool(
-            name = "openDiff",
-            description = "(IDE Tool) Open a diff view to create or modify a file. Returns a notification once the diff has been accepted or rejected.",
+            name = "openDiff", // ОБЯЗАТЕЛЬНО возвращаем это имя!
+            description = "(IDE Tool) Propose changes to a file. The IDE will open a diff review and AUTOMATICALLY WRITE THE FILE TO DISK when the user accepts. This tool blocks until the user decides. If this tool returns success, THE FILE HAS ALREADY BEEN WRITTEN AND SAVED. You MUST NOT use WriteFile, Shell, or printf to modify this file afterwards.",
             inputSchema = Tool.Input(
                 properties = buildJsonObject {
                     put("filePath", buildJsonObject { put("type", "string") })
@@ -171,13 +172,18 @@ class CliqIdeServer(private val project: Project) : Disposable {
                 ApplicationManager.getApplication().invokeLater {
                     project.service<CliqDiffManager>().applyDirectly(filePath, newContent)
                 }
-            } else {
-                ApplicationManager.getApplication().invokeLater {
-                    project.service<CliqDiffManager>().showDiff(filePath, newContent)
-                }
+                return@addTool CallToolResult(content = listOf(TextContent("Changes applied directly.")))
             }
 
-            CallToolResult(content = emptyList())
+            val deferred = CompletableDeferred<CallToolResult>()
+            pendingDiffs[filePath] = deferred
+
+            ApplicationManager.getApplication().invokeLater {
+                project.service<CliqDiffManager>().showDiff(filePath, newContent)
+            }
+
+            // Блокируем тул до реакции пользователя
+            deferred.await()
         }
 
         server.addTool(
@@ -297,21 +303,35 @@ class CliqIdeServer(private val project: Project) : Disposable {
 
         project.messageBus.connect(this).subscribe(CliqDiffManager.TOPIC, object : CliqDiffManager.DiffListener {
             override fun onDiffOutcome(outcome: CliqDiffOutcome) {
-                if (outcome is CliqDiffOutcome.Rejected && outcome.suppressed) return
-                val notification = when (outcome) {
-                    is CliqDiffOutcome.Accepted -> JSONRPCNotification(
-                        method = "ide/diffAccepted",
-                        params = buildJsonObject {
-                            put("filePath", outcome.filePath)
-                            put("content", outcome.finalContent)
-                        }
-                    )
-                    is CliqDiffOutcome.Rejected -> JSONRPCNotification(
-                        method = "ide/diffClosed",
-                        params = buildJsonObject { put("filePath", outcome.filePath) }
-                    )
+                // 1. СНАЧАЛА отправляем нотификацию, чтобы Gemini CLI обновил свой стейт
+                if (!(outcome is CliqDiffOutcome.Rejected && outcome.suppressed)) {
+                    val notification = when (outcome) {
+                        is CliqDiffOutcome.Accepted -> JSONRPCNotification(
+                            method = "ide/diffAccepted",
+                            params = buildJsonObject {
+                                put("filePath", outcome.filePath)
+                                put("content", outcome.finalContent)
+                            }
+                        )
+                        is CliqDiffOutcome.Rejected -> JSONRPCNotification(
+                            method = "ide/diffClosed",
+                            params = buildJsonObject { put("filePath", outcome.filePath) }
+                        )
+                    }
+                    broadcastNotification(notification)
                 }
-                broadcastNotification(notification)
+
+                // 2. ЗАТЕМ разблокируем инструмент openDiff и отдаем финальный ответ агенту
+                val deferred = pendingDiffs.remove(outcome.filePath)
+                if (deferred != null) {
+                    val resultText = when (outcome) {
+                        is CliqDiffOutcome.Accepted ->
+                            "SUCCESS: User accepted the changes. The IDE has automatically saved the file to disk. Task complete. Do not run WriteFile or Shell."
+                        is CliqDiffOutcome.Rejected ->
+                            "REJECTED: User dismissed the changes."
+                    }
+                    deferred.complete(CallToolResult(content = listOf(TextContent(resultText))))
+                }
             }
         })
 

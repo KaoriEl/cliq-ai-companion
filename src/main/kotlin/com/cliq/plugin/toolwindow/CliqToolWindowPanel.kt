@@ -111,7 +111,7 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
                 .mapNotNull { vf -> PathUtil.toRelativePosix(basePath, vf.path) }
                 .filter { it.isNotBlank() }
             if (tokens.isEmpty()) return
-            val payload = tokens.joinToString(" ") { "@${CliPathEscaper.escape(it)}" } + " "
+            val payload = " " + tokens.joinToString(" ") { "@${CliPathEscaper.escape(it)}" } + " "
             TerminalTyper.typeInActiveTerminal(project, payload)
         }
         // ────────────────────────────────────────────────────────────────────

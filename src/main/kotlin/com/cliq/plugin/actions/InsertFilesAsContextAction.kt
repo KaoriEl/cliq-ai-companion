@@ -43,6 +43,6 @@ class InsertFilesAsContextAction : AnAction(), DumbAware {
             .joinToString(" ") { "@${CliPathEscaper.escape(it)}" }
 
         if (tokens.isBlank()) return
-        TerminalTyper.typeInActiveTerminal(project, "$tokens ")
+        TerminalTyper.typeInActiveTerminal(project, " $tokens ")
     }
 }
