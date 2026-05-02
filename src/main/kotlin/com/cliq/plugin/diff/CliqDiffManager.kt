@@ -39,7 +39,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 class CliqDiffManager(private val project: Project) : Disposable {
 
     private val log = logger<CliqDiffManager>()
-    private val reviews = mutableMapOf<String, ReviewState>()
+    private val reviews = java.util.concurrent.ConcurrentHashMap<String, ReviewState>()
     private val listeners = CopyOnWriteArrayList<DiffListener>()
 
     interface DiffListener : EventListener {
@@ -57,7 +57,7 @@ class CliqDiffManager(private val project: Project) : Disposable {
                 if (file is ChainDiffVirtualFile) {
                     val producer = file.chain.requests.firstOrNull() as? SimpleDiffRequestChain.DiffRequestProducerWrapper
                     val path = producer?.request?.getUserData(FILE_PATH_KEY) ?: return
-
+                    
                     if (reviews.containsKey(path)) {
                         log.info("Diff tab for $path closed manually, rejecting review.")
                         reject(path)
@@ -71,6 +71,9 @@ class CliqDiffManager(private val project: Project) : Disposable {
     fun removeListener(listener: DiffListener) { listeners.remove(listener) }
 
     fun showDiff(filePath: String, proposedContent: String) {
+        if (reviews.containsKey(filePath)) {
+            closeDiff(filePath, suppressNotification = true)
+        }
         val factory = DiffContentFactory.getInstance()
         val existing = LocalFileSystem.getInstance().findFileByPath(filePath)
         val fileType: FileType = existing?.fileType
@@ -90,6 +93,7 @@ class CliqDiffManager(private val project: Project) : Disposable {
         request.putUserData(DiffUserDataKeys.PREFERRED_FOCUS_SIDE, Side.RIGHT)
         request.putUserData(DiffUserDataKeys.FORCE_READ_ONLY_CONTENTS, booleanArrayOf(true, false))
         request.putUserData(FILE_PATH_KEY, filePath)
+
         request.putUserData(DiffUserDataKeysEx.LAST_REVISION_WITH_LOCAL, true)
         request.putUserData(DiffUserDataKeysEx.VCS_DIFF_ACCEPT_LEFT_ACTION_TEXT, DiffBundle.message("action.presentation.diff.revert.text"))
 
@@ -112,8 +116,7 @@ class CliqDiffManager(private val project: Project) : Disposable {
     }
 
     fun accept(filePath: String) {
-        val review = reviews[filePath] ?: return
-
+        val review = reviews.remove(filePath) ?: return
         val finalText = readRightSideText(filePath) ?: review.proposedContent
         try {
             writeFile(filePath, finalText)
@@ -122,19 +125,20 @@ class CliqDiffManager(private val project: Project) : Disposable {
             notifyError("Failed to apply changes to $filePath: ${t.message ?: t.javaClass.simpleName}")
             return
         }
-
-        finishReview(filePath, CliqDiffOutcome.Accepted(filePath, finalText))
+        finishReviewAfterRemoved(filePath, CliqDiffOutcome.Accepted(filePath, finalText))
     }
 
     fun applyDirectly(filePath: String, newContent: String) {
-        try {
-            writeFile(filePath, newContent)
-            val outcome = CliqDiffOutcome.Accepted(filePath, newContent)
-            listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
-            project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
-        } catch (t: Throwable) {
-            log.warn("Failed to auto-apply $filePath", t)
-            notifyError("Failed to auto-apply changes to $filePath: ${t.message ?: t.javaClass.simpleName}")
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                writeFile(filePath, newContent)
+                val outcome = CliqDiffOutcome.Accepted(filePath, newContent)
+                listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
+                project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
+            } catch (t: Throwable) {
+                log.warn("Failed to auto-apply $filePath", t)
+                notifyError("Failed to auto-apply changes to $filePath: ${t.message ?: t.javaClass.simpleName}")
+            }
         }
     }
 
@@ -146,19 +150,23 @@ class CliqDiffManager(private val project: Project) : Disposable {
     }
 
     fun reject(filePath: String) {
-        if (!reviews.containsKey(filePath)) return
-        finishReview(filePath, CliqDiffOutcome.Rejected(filePath))
+        reviews.remove(filePath) ?: return
+        finishReviewAfterRemoved(filePath, CliqDiffOutcome.Rejected(filePath))
     }
 
     fun closeDiff(filePath: String, suppressNotification: Boolean = false): String? {
-        val review = reviews[filePath] ?: return null
+        val review = reviews.remove(filePath) ?: return null
         val text = readRightSideText(filePath) ?: review.proposedContent
-        finishReview(filePath, CliqDiffOutcome.Rejected(filePath, suppressNotification))
+        finishReviewAfterRemoved(filePath, CliqDiffOutcome.Rejected(filePath, suppressNotification))
         return text
     }
 
     private fun finishReview(filePath: String, outcome: CliqDiffOutcome) {
         reviews.remove(filePath)
+        finishReviewAfterRemoved(filePath, outcome)
+    }
+
+    private fun finishReviewAfterRemoved(filePath: String, outcome: CliqDiffOutcome) {
         closeDiffTab(filePath)
         listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
         project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
@@ -207,8 +215,9 @@ class CliqDiffManager(private val project: Project) : Disposable {
 
         WriteAction.runAndWait<Throwable> {
             if (!ioFile.exists()) ioFile.createNewFile()
-            val virtual: VirtualFile? = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
-            virtual?.setBinaryContent(text.toByteArray(StandardCharsets.UTF_8))
+            val virtual = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
+                ?: error("VFS could not resolve newly created file: $path")
+            virtual.setBinaryContent(text.toByteArray(StandardCharsets.UTF_8))
         }
     }
 

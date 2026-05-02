@@ -15,38 +15,23 @@
     <depends>org.jetbrains.plugins.terminal</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <!-- Settings page lives under Settings | Tools | Cliq. -->
         <applicationConfigurable
             parentId="tools"
             id="com.cliq.plugin.settings.CliqSettingsConfigurable"
             instance="com.cliq.plugin.settings.CliqSettingsConfigurable"
             displayName="Cliq"/>
 
-        <!-- Persistent application-level state for CLI executable paths. -->
-        <applicationService serviceImplementation="com.cliq.plugin.settings.CliqSettings"/>
-
-        <!-- Notification group used for welcome and error balloons. -->
         <notificationGroup id="Cliq" displayType="BALLOON"/>
 
-        <!-- Tool window shown on the right; contents built by `CliqToolWindowFactory`. -->
         <toolWindow
             id="Cliq"
             anchor="right"
             icon="/icons/cliq.svg"
             factoryClass="com.cliq.plugin.toolwindow.CliqToolWindowFactory"/>
 
-        <!-- Replaces deprecated `StartupActivity`; runs once per opened project. -->
         <postStartupActivity implementation="com.cliq.plugin.startup.CliqStartupActivity"/>
-
-        <!-- Project-level services. -->
-        <projectService serviceImplementation="com.cliq.plugin.terminal.CliqTerminalLauncher"/>
-        <projectService serviceImplementation="com.cliq.plugin.context.OpenFilesTracker"/>
-        <projectService serviceImplementation="com.cliq.plugin.diff.CliqDiffManager"/>
-        <projectService serviceImplementation="com.cliq.plugin.mcp.CliqIdeServer"/>
     </extensions>
 
-    <!-- Bridge between the IDE's integrated terminal and the Cliq IDE server:
-         injects GEMINI_CLI_IDE_* env vars so spawned CLIs autodiscover us. -->
     <extensions defaultExtensionNs="org.jetbrains.plugins.terminal">
         <localTerminalCustomizer implementation="com.cliq.plugin.terminal.CliqTerminalEnvCustomizer"/>
     </extensions>
@@ -75,11 +60,11 @@
             id="com.cliq.plugin.ProposeDemoDiff"
             class="com.cliq.plugin.actions.ProposeDemoDiffAction"
             text="Cliq: Propose Demo Diff for Current File"
-            description="Open a Cliq review against the focused file (development helper)">
+            description="Open a Cliq review against the focused file (development helper)"
+            internal="true">
             <add-to-group group-id="ToolsMenu" anchor="after" relative-to-action="com.cliq.plugin.OpenSettings"/>
         </action>
 
-        <!-- Bound to the diff editor's floating toolbar. Visible only inside Cliq reviews. -->
         <action
             id="com.cliq.plugin.AcceptDiff"
             class="com.cliq.plugin.diff.AcceptCliqDiffAction"
@@ -95,7 +80,6 @@
             <keyboard-shortcut keymap="$default" first-keystroke="alt BACK_SPACE"/>
         </action>
 
-        <!-- Insert @-tokens for selected Project View / editor files into the active terminal prompt. -->
         <action
             id="com.cliq.plugin.InsertFilesAsContext"
             class="com.cliq.plugin.actions.InsertFilesAsContextAction"

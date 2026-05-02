@@ -4,6 +4,7 @@ import com.cliq.plugin.CliqPlugin
 import com.cliq.plugin.agents.Agent
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
@@ -45,7 +46,13 @@ class CliqTerminalLauncher(private val project: Project) {
                     true,
                     true,
                 )
-                widget.sendCommandToExecute(command)
+                ApplicationManager.getApplication().invokeLater {
+                    try {
+                        widget.sendCommandToExecute(command)
+                    } catch (t: Throwable) {
+                        log.warn("Failed to send command to widget", t)
+                    }
+                }
             } catch (t: Throwable) {
                 log.warn("Failed to launch ${agent.displayName} via terminal", t)
                 notify(

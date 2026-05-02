@@ -186,7 +186,8 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
 
         val startBtn = CliqButton("Start", CliqButton.Variant.GHOST).apply {
             addActionListener {
-                val selectedAgent = agents.getOrNull(agentCombo.selectedIndex)
+                val agentsNow = CliqSettings.getInstance().agents()
+                val selectedAgent = agentsNow.getOrNull(agentCombo.selectedIndex)
                 if (selectedAgent != null) {
                     launcher.launch(selectedAgent)
                 }

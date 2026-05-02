@@ -1,7 +1,5 @@
 package com.cliq.plugin.mcp.transport
 
-import io.ktor.http.parseHeaderValue
-import io.ktor.util.collections.ConcurrentMap
 import io.modelcontextprotocol.kotlin.sdk.*
 import io.modelcontextprotocol.kotlin.sdk.shared.AbstractTransport
 import io.modelcontextprotocol.kotlin.sdk.shared.McpJson
@@ -49,9 +47,9 @@ public class StreamableHttpServerTransport(
   private val started: AtomicBoolean = AtomicBoolean(false)
   private val initialized: AtomicBoolean = AtomicBoolean(false)
 
-  internal val streamsMapping: ConcurrentMap<String, SessionContext> = ConcurrentMap()
-  private val requestToStreamMapping: ConcurrentMap<RequestId, String> = ConcurrentMap()
-  private val requestToResponseMapping: ConcurrentMap<RequestId, JSONRPCMessage> = ConcurrentMap()
+  internal val streamsMapping: java.util.concurrent.ConcurrentHashMap<String, SessionContext> = java.util.concurrent.ConcurrentHashMap()
+  private val requestToStreamMapping: java.util.concurrent.ConcurrentHashMap<RequestId, String> = java.util.concurrent.ConcurrentHashMap()
+  private val requestToResponseMapping: java.util.concurrent.ConcurrentHashMap<RequestId, JSONRPCMessage> = java.util.concurrent.ConcurrentHashMap()
 
   private val sessionMutex = Mutex()
   private val streamMutex = Mutex()
@@ -142,7 +140,10 @@ public class StreamableHttpServerTransport(
 
   override suspend fun close() {
     streamMutex.withLock {
-      streamsMapping.values.forEach { it.writer?.close() }
+      streamsMapping.values.forEach {
+        runCatching { it.writer?.close() }
+        runCatching { it.adapter.close() }
+      }
       streamsMapping.clear()
       requestToResponseMapping.clear()
       requestToStreamMapping.clear()
@@ -150,12 +151,15 @@ public class StreamableHttpServerTransport(
     }
   }
 
+  private fun parseAcceptHeader(value: String): List<String> =
+      value.split(",").map { it.substringBefore(';').trim().lowercase() }
+
   suspend fun handlePostRequest(adapter: HttpExchangeAdapter) {
     try {
       val acceptHeader = adapter.getRequestHeader("Accept") ?: ""
-      val parsedHeaders = parseHeaderValue(acceptHeader)
-      val isAcceptEventStream = parsedHeaders.any { it.value.equals("text/event-stream", ignoreCase = true) }
-      val isAcceptJson = parsedHeaders.any { it.value.equals("application/json", ignoreCase = true) || it.value.equals("*/*", ignoreCase = true) }
+      val parsedAccept = parseAcceptHeader(acceptHeader)
+      val isAcceptEventStream = parsedAccept.any { it == "text/event-stream" }
+      val isAcceptJson = parsedAccept.any { it == "application/json" || it == "*/*" }
 
       if (!isAcceptEventStream && !isAcceptJson) {
         reject(adapter, 406, ErrorCode.Unknown(-32000), "Not Acceptable: Client must accept both application/json and text/event-stream")
@@ -231,7 +235,7 @@ public class StreamableHttpServerTransport(
     }
 
     val acceptHeader = adapter.getRequestHeader("Accept") ?: ""
-    if (!parseHeaderValue(acceptHeader).any { it.value.equals("text/event-stream", ignoreCase = true) }) {
+    if (!parseAcceptHeader(acceptHeader).any { it == "text/event-stream" }) {
       reject(adapter, 406, ErrorCode.Unknown(-32000), "Not Acceptable: Client must accept text/event-stream")
       return
     }
@@ -320,6 +324,8 @@ public class StreamableHttpServerTransport(
     } catch (e: Exception) {
       _onError(e)
       streamsMapping.remove(streamId)
+      runCatching { sessionContext.writer?.close() }
+      runCatching { sessionContext.adapter.close() }
     }
   }
 
