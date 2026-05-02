@@ -38,36 +38,25 @@ import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.Executors
 
-/**
- * Project-scoped MCP-over-HTTP server that lets external CLI agents (Gemini,
- * Claude) drive the Cliq diff manager and observe the editor's open files.
- *
- * Uses the MCP Kotlin SDK's Server + StreamableHttpServerTransport so that
- * notifications (ide/diffAccepted, ide/diffClosed, ide/contextUpdate) are
- * delivered correctly over the SSE channel the agent holds open.
- */
 @Service(Service.Level.PROJECT)
 class CliqIdeServer(private val project: Project) : Disposable {
 
     private val log = logger<CliqIdeServer>()
     private val authToken: String = generateAuthToken()
-    private val transports = mutableMapOf<String, StreamableHttpServerTransport>()
-    private val sessionsWithInitialNotification = mutableSetOf<String>()
-    private val keepAliveJobs = mutableMapOf<String, Job>()
+    private val transports = java.util.concurrent.ConcurrentHashMap<String, StreamableHttpServerTransport>()
+    private val sessionsWithInitialNotification = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val mcpServer = createMcpServer()
     private val coroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val pendingDiffs = java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<CallToolResult>>()
+    private val started = java.util.concurrent.atomic.AtomicBoolean(false)
 
     @Volatile private var server: HttpServer? = null
     @Volatile private var boundPort: Int? = null
     @Volatile private var workspacePath: String = ""
-    private val discoveryFiles = mutableListOf<File>()
-
-    companion object {
-        private const val KEEP_ALIVE_INTERVAL_MS = 30_000L
-    }
+    private val discoveryFiles = java.util.concurrent.CopyOnWriteArrayList<File>()
 
     fun start() {
-        if (server != null) return
+        if (!started.compareAndSet(false, true)) return
         ApplicationManager.getApplication().executeOnPooledThread {
             try {
                 val httpServer = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
@@ -84,6 +73,7 @@ class CliqIdeServer(private val project: Project) : Disposable {
                 writeDiscoveryFiles()
                 wireListeners()
             } catch (t: Throwable) {
+                started.set(false)
                 log.warn("Failed to start Cliq IDE server", t)
             }
         }
@@ -151,7 +141,7 @@ class CliqIdeServer(private val project: Project) : Disposable {
 
         server.addTool(
             name = "openDiff",
-            description = "(IDE Tool) Open a diff view to create or modify a file. Returns a notification once the diff has been accepted or rejected.",
+            description = "(IDE Tool) Propose changes to a file. The IDE will open a diff review and AUTOMATICALLY WRITE THE FILE TO DISK when the user accepts. This tool blocks until the user decides. If this tool returns success, THE FILE HAS ALREADY BEEN WRITTEN AND SAVED. You MUST NOT use WriteFile, Shell, or printf to modify this file afterwards.",
             inputSchema = Tool.Input(
                 properties = buildJsonObject {
                     put("filePath", buildJsonObject { put("type", "string") })
@@ -171,13 +161,27 @@ class CliqIdeServer(private val project: Project) : Disposable {
                 ApplicationManager.getApplication().invokeLater {
                     project.service<CliqDiffManager>().applyDirectly(filePath, newContent)
                 }
-            } else {
-                ApplicationManager.getApplication().invokeLater {
-                    project.service<CliqDiffManager>().showDiff(filePath, newContent)
-                }
+                return@addTool CallToolResult(content = listOf(TextContent("Changes applied directly.")))
             }
 
-            CallToolResult(content = emptyList())
+            val deferred = CompletableDeferred<CallToolResult>()
+            pendingDiffs.put(filePath, deferred)?.let { stale ->
+                stale.complete(CallToolResult(
+                    content = listOf(TextContent("REJECTED: superseded by a newer openDiff call.")),
+                    isError = true
+                ))
+            }
+
+            ApplicationManager.getApplication().invokeLater {
+                project.service<CliqDiffManager>().showDiff(filePath, newContent)
+            }
+
+            try {
+                deferred.await()
+            } catch (t: Throwable) {
+                pendingDiffs.remove(filePath, deferred)
+                throw t
+            }
         }
 
         server.addTool(
@@ -205,17 +209,15 @@ class CliqIdeServer(private val project: Project) : Disposable {
 
     private suspend fun handleMcpPostRequest(adapter: HttpExchangeAdapter) {
         val sessionId = adapter.getRequestHeader("mcp-session-id")
-        val transport = if (sessionId != null && transports.containsKey(sessionId)) {
-            transports[sessionId]!!
-        } else {
+        val existing = sessionId?.let { transports[it] }
+        val transport = existing ?: run {
             val newTransport = StreamableHttpServerTransport(
                 enableJsonResponse = false,
                 allowedHosts = listOf("localhost", "127.0.0.1")
             )
             newTransport.setOnSessionInitialized { newSessionId ->
                 log.info("New MCP session initialized: $newSessionId")
-                transports[newSessionId] = newTransport
-                startKeepAliveForSession(newSessionId, newTransport)
+                transports.putIfAbsent(newSessionId, newTransport)
             }
             newTransport.setOnSessionClosed { closedSessionId ->
                 log.info("MCP session closed: $closedSessionId")
@@ -229,42 +231,27 @@ class CliqIdeServer(private val project: Project) : Disposable {
 
     private suspend fun handleMcpGetRequest(adapter: HttpExchangeAdapter) {
         val sessionId = adapter.getRequestHeader("mcp-session-id")
-        if (sessionId == null || !transports.containsKey(sessionId)) {
+        val transport = if (sessionId != null) transports[sessionId] else null
+        if (transport == null) {
             reject(adapter, 400, ErrorCode.Unknown(-32001), "Invalid or missing session ID")
             return
         }
-        val transport = transports[sessionId]!!
         transport.handleGetRequest(adapter)
 
         if (!sessionsWithInitialNotification.contains(sessionId)) {
-            sendInitialIdeContextToSession(sessionId, transport)
+            sendInitialIdeContextToSession(sessionId!!, transport)
             sessionsWithInitialNotification.add(sessionId)
         }
     }
 
     private suspend fun handleMcpDeleteRequest(adapter: HttpExchangeAdapter) {
         val sessionId = adapter.getRequestHeader("mcp-session-id")
-        if (sessionId == null || !transports.containsKey(sessionId)) {
+        val transport = if (sessionId != null) transports[sessionId] else null
+        if (transport == null) {
             reject(adapter, 400, ErrorCode.Unknown(-32001), "Invalid or missing session ID")
             return
         }
-        transports[sessionId]!!.handleDeleteRequest(adapter)
-    }
-
-    private fun startKeepAliveForSession(sessionId: String, transport: StreamableHttpServerTransport) {
-        val job = coroutineScope.launch {
-            while (isActive && transports.containsKey(sessionId)) {
-                try {
-                    delay(KEEP_ALIVE_INTERVAL_MS)
-                    transport.send(JSONRPCNotification(jsonrpc = "2.0", method = "ping"))
-                } catch (e: Exception) {
-                    log.warn("Failed to send keep-alive ping for session $sessionId: ${e.message}")
-                    cleanupSession(sessionId)
-                    break
-                }
-            }
-        }
-        keepAliveJobs[sessionId] = job
+        transport.handleDeleteRequest(adapter)
     }
 
     private fun sendInitialIdeContextToSession(sessionId: String, transport: StreamableHttpServerTransport) {
@@ -283,39 +270,53 @@ class CliqIdeServer(private val project: Project) : Disposable {
 
     private fun cleanupSession(sessionId: String) {
         log.info("Cleaning up session: $sessionId")
-        keepAliveJobs.remove(sessionId)?.cancel()
         sessionsWithInitialNotification.remove(sessionId)
-        transports.remove(sessionId)
+        val t = transports.remove(sessionId) ?: return
+        coroutineScope.launch { runCatching { t.close() } }
     }
 
     private fun wireListeners() {
-        project.service<OpenFilesTracker>().addListener(object : OpenFilesTracker.WorkspaceContextListener {
+        val connection = project.messageBus.connect(this)
+        
+        connection.subscribe(OpenFilesTracker.TOPIC, object : OpenFilesTracker.WorkspaceContextListener {
             override fun onContextChanged(context: WorkspaceContext) {
                 broadcastIdeContextUpdate()
             }
         })
 
-        project.messageBus.connect(this).subscribe(CliqDiffManager.TOPIC, object : CliqDiffManager.DiffListener {
+        connection.subscribe(CliqDiffManager.TOPIC, object : CliqDiffManager.DiffListener {
             override fun onDiffOutcome(outcome: CliqDiffOutcome) {
-                if (outcome is CliqDiffOutcome.Rejected && outcome.suppressed) return
-                val notification = when (outcome) {
-                    is CliqDiffOutcome.Accepted -> JSONRPCNotification(
-                        method = "ide/diffAccepted",
-                        params = buildJsonObject {
-                            put("filePath", outcome.filePath)
-                            put("content", outcome.finalContent)
-                        }
-                    )
-                    is CliqDiffOutcome.Rejected -> JSONRPCNotification(
-                        method = "ide/diffClosed",
-                        params = buildJsonObject { put("filePath", outcome.filePath) }
-                    )
+                if (!(outcome is CliqDiffOutcome.Rejected && outcome.suppressed)) {
+                    val notification = when (outcome) {
+                        is CliqDiffOutcome.Accepted -> JSONRPCNotification(
+                            method = "ide/diffAccepted",
+                            params = buildJsonObject {
+                                put("filePath", outcome.filePath)
+                                put("content", outcome.finalContent)
+                            }
+                        )
+                        is CliqDiffOutcome.Rejected -> JSONRPCNotification(
+                            method = "ide/diffClosed",
+                            params = buildJsonObject { put("filePath", outcome.filePath) }
+                        )
+                    }
+                    broadcastNotification(notification)
                 }
-                broadcastNotification(notification)
+
+                val deferred = pendingDiffs.remove(outcome.filePath)
+                if (deferred != null) {
+                    val resultText = when (outcome) {
+                        is CliqDiffOutcome.Accepted ->
+                            "SUCCESS: User accepted the changes. The IDE has automatically saved the file to disk. Task complete. Do not run WriteFile or Shell."
+                        is CliqDiffOutcome.Rejected ->
+                            "REJECTED: User dismissed the changes."
+                    }
+                    deferred.complete(CallToolResult(content = listOf(TextContent(resultText))))
+                }
             }
         })
 
-        project.messageBus.connect(this).subscribe(ModuleRootListener.TOPIC, object : ModuleRootListener {
+        connection.subscribe(ModuleRootListener.TOPIC, object : ModuleRootListener {
             override fun rootsChanged(event: ModuleRootEvent) {
                 val newPath = resolveWorkspacePath()
                 if (newPath != workspacePath) {
@@ -350,7 +351,7 @@ class CliqIdeServer(private val project: Project) : Disposable {
     }
 
     private fun broadcastNotification(notification: JSONRPCNotification) {
-        log.info("Broadcasting notification '${notification.method}' to ${transports.size} sessions")
+        log.debug("Broadcasting notification '${notification.method}' to ${transports.size} sessions")
         transports.forEach { (sessionId, transport) ->
             coroutineScope.launch {
                 try {
@@ -371,6 +372,8 @@ class CliqIdeServer(private val project: Project) : Disposable {
 
     private fun writeDiscoveryFiles() {
         val port = boundPort ?: return
+        discoveryFiles.forEach { runCatching { it.delete() } }
+        discoveryFiles.clear()
         val info = ApplicationInfo.getInstance()
         val ideInfo = IdeInfo(
             info.versionName.lowercase(Locale.getDefault()).replace(" ", ""),
@@ -396,8 +399,16 @@ class CliqIdeServer(private val project: Project) : Disposable {
 
     override fun dispose() {
         transports.keys.toList().forEach { cleanupSession(it) }
+        pendingDiffs.values.forEach {
+            runCatching { it.complete(CallToolResult(
+                content = listOf(TextContent("REJECTED: IDE shutting down.")),
+                isError = true
+            )) }
+        }
+        pendingDiffs.clear()
         coroutineScope.cancel()
         server?.stop(0)
+        server = null
         discoveryFiles.forEach { runCatching { it.delete() } }
         discoveryFiles.clear()
     }

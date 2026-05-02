@@ -35,28 +35,11 @@ import java.nio.file.Paths
 import java.util.EventListener
 import java.util.concurrent.CopyOnWriteArrayList
 
-/**
- * Project-scoped service that owns the lifecycle of Cliq diff reviews.
- *
- * For each open review we:
- *   1. Build a `SimpleDiffRequest` with the current file content on the left
- *      (read-only) and the agent-proposed content on the right (editable, so
- *      the user can tweak suggestions before accepting).
- *   2. Attach **Accept All Changes** and **Reject All Changes** actions via
- *      `DiffUserDataKeys.CONTEXT_ACTIONS`.
- *   3. Track the review by file path so subsequent calls (`accept`, `reject`,
- *      `closeDiff`) can locate the matching tab and resolve it.
- *
- * Accept writes the (possibly user-edited) right-side text to disk via the
- * VFS, closes the diff tab, and emits [CliqDiffOutcome.Accepted]. Reject just
- * closes the tab and emits [CliqDiffOutcome.Rejected]; the original file is
- * untouched.
- */
 @Service(Service.Level.PROJECT)
 class CliqDiffManager(private val project: Project) : Disposable {
 
     private val log = logger<CliqDiffManager>()
-    private val reviews = mutableMapOf<String, ReviewState>()
+    private val reviews = java.util.concurrent.ConcurrentHashMap<String, ReviewState>()
     private val listeners = CopyOnWriteArrayList<DiffListener>()
 
     interface DiffListener : EventListener {
@@ -64,22 +47,17 @@ class CliqDiffManager(private val project: Project) : Disposable {
     }
 
     companion object {
-        /** Stored on the diff request so we can find it later by file path. */
         val FILE_PATH_KEY: Key<String> = Key.create("cliq.diff.filePath")
         val TOPIC: Topic<DiffListener> = Topic.create("Cliq Diff Outcome", DiffListener::class.java)
     }
 
     init {
-        // Listen for tab closures. If a Cliq review tab is closed by the user
-        // (rather than our `closeFile` call), we treat it as a rejection.
         project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
             override fun fileClosed(source: FileEditorManager, file: VirtualFile) {
                 if (file is ChainDiffVirtualFile) {
                     val producer = file.chain.requests.firstOrNull() as? SimpleDiffRequestChain.DiffRequestProducerWrapper
                     val path = producer?.request?.getUserData(FILE_PATH_KEY) ?: return
                     
-                    // If the review state still exists, it means the tab was closed 
-                    // manually (X button) or by other means, not by our `accept`/`reject`.
                     if (reviews.containsKey(path)) {
                         log.info("Diff tab for $path closed manually, rejecting review.")
                         reject(path)
@@ -92,25 +70,18 @@ class CliqDiffManager(private val project: Project) : Disposable {
     fun addListener(listener: DiffListener) { listeners.add(listener) }
     fun removeListener(listener: DiffListener) { listeners.remove(listener) }
 
-    /**
-     * Opens an interactive review for [filePath] that compares its current
-     * on-disk contents (or empty, if [filePath] does not exist yet) against
-     * [proposedContent].
-     */
     fun showDiff(filePath: String, proposedContent: String) {
+        if (reviews.containsKey(filePath)) {
+            closeDiff(filePath, suppressNotification = true)
+        }
         val factory = DiffContentFactory.getInstance()
         val existing = LocalFileSystem.getInstance().findFileByPath(filePath)
-        // Resolve a FileType by name even when the file does not yet exist on
-        // disk — this is what makes the right pane highlight Go/PHP/JS source
-        // for proposals that create new files.
         val fileType: FileType = existing?.fileType
             ?: FileTypeRegistry.getInstance().getFileTypeByFileName(Paths.get(filePath).fileName.toString())
 
         val left = if (existing != null) {
             factory.create(project, existing)
         } else {
-            // Empty placeholder still typed so the left pane gets the same
-            // highlighter as the right one for new-file proposals.
             factory.create("", fileType)
         }
         val right = factory.createEditable(project, proposedContent, fileType)
@@ -120,18 +91,12 @@ class CliqDiffManager(private val project: Project) : Disposable {
 
         request.putUserData(DiffUserDataKeys.MASTER_SIDE, Side.RIGHT)
         request.putUserData(DiffUserDataKeys.PREFERRED_FOCUS_SIDE, Side.RIGHT)
-        // Left = the file on disk, never directly editable from this view.
         request.putUserData(DiffUserDataKeys.FORCE_READ_ONLY_CONTENTS, booleanArrayOf(true, false))
         request.putUserData(FILE_PATH_KEY, filePath)
 
-        // Hint the platform that the right pane is the "current/local" copy
-        // and the left is the prior revision. This unlocks per-hunk gutter
-        // arrows that revert (← reject) or apply (→ accept) individual
-        // changes.
         request.putUserData(DiffUserDataKeysEx.LAST_REVISION_WITH_LOCAL, true)
         request.putUserData(DiffUserDataKeysEx.VCS_DIFF_ACCEPT_LEFT_ACTION_TEXT, DiffBundle.message("action.presentation.diff.revert.text"))
 
-        // Mount the global review controls in the diff tab's toolbar.
         request.putUserData(
             DiffUserDataKeys.CONTEXT_ACTIONS,
             listOf(RejectCliqDiffAction(), AcceptCliqDiffAction()),
@@ -150,13 +115,8 @@ class CliqDiffManager(private val project: Project) : Disposable {
         }
     }
 
-    /**
-     * Persists the right-side content to [filePath] and closes the review.
-     * Idempotent: a no-op if no review is active for the path.
-     */
     fun accept(filePath: String) {
-        val review = reviews[filePath] ?: return
-
+        val review = reviews.remove(filePath) ?: return
         val finalText = readRightSideText(filePath) ?: review.proposedContent
         try {
             writeFile(filePath, finalText)
@@ -165,19 +125,20 @@ class CliqDiffManager(private val project: Project) : Disposable {
             notifyError("Failed to apply changes to $filePath: ${t.message ?: t.javaClass.simpleName}")
             return
         }
-
-        finishReview(filePath, CliqDiffOutcome.Accepted(filePath, finalText))
+        finishReviewAfterRemoved(filePath, CliqDiffOutcome.Accepted(filePath, finalText))
     }
 
     fun applyDirectly(filePath: String, newContent: String) {
-        try {
-            writeFile(filePath, newContent)
-            val outcome = CliqDiffOutcome.Accepted(filePath, newContent)
-            listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
-            project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
-        } catch (t: Throwable) {
-            log.warn("Failed to auto-apply $filePath", t)
-            notifyError("Failed to auto-apply changes to $filePath: ${t.message ?: t.javaClass.simpleName}")
+        ApplicationManager.getApplication().invokeLater {
+            try {
+                writeFile(filePath, newContent)
+                val outcome = CliqDiffOutcome.Accepted(filePath, newContent)
+                listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
+                project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
+            } catch (t: Throwable) {
+                log.warn("Failed to auto-apply $filePath", t)
+                notifyError("Failed to auto-apply changes to $filePath: ${t.message ?: t.javaClass.simpleName}")
+            }
         }
     }
 
@@ -188,25 +149,24 @@ class CliqDiffManager(private val project: Project) : Disposable {
             .notify(project)
     }
 
-    /** Closes the review without writing changes. */
     fun reject(filePath: String) {
-        if (!reviews.containsKey(filePath)) return
-        finishReview(filePath, CliqDiffOutcome.Rejected(filePath))
+        reviews.remove(filePath) ?: return
+        finishReviewAfterRemoved(filePath, CliqDiffOutcome.Rejected(filePath))
     }
 
-    /**
-     * External "close" trigger (e.g. CLI tells the IDE to drop the review
-     * regardless of user action). Currently treated as rejection.
-     */
     fun closeDiff(filePath: String, suppressNotification: Boolean = false): String? {
-        val review = reviews[filePath] ?: return null
+        val review = reviews.remove(filePath) ?: return null
         val text = readRightSideText(filePath) ?: review.proposedContent
-        finishReview(filePath, CliqDiffOutcome.Rejected(filePath, suppressNotification))
+        finishReviewAfterRemoved(filePath, CliqDiffOutcome.Rejected(filePath, suppressNotification))
         return text
     }
 
     private fun finishReview(filePath: String, outcome: CliqDiffOutcome) {
         reviews.remove(filePath)
+        finishReviewAfterRemoved(filePath, outcome)
+    }
+
+    private fun finishReviewAfterRemoved(filePath: String, outcome: CliqDiffOutcome) {
         closeDiffTab(filePath)
         listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
         project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
@@ -240,10 +200,6 @@ class CliqDiffManager(private val project: Project) : Disposable {
         return null
     }
 
-    /**
-     * Writes [text] to [path], creating the file (and its parent directories)
-     * if necessary. Performed under a write command so undo history records it.
-     */
     private fun writeFile(path: String, text: String) {
         val ioFile = File(path)
         val parent = ioFile.parentFile
@@ -257,11 +213,11 @@ class CliqDiffManager(private val project: Project) : Disposable {
             return
         }
 
-        // New file path — create through the VFS so file system listeners fire.
         WriteAction.runAndWait<Throwable> {
             if (!ioFile.exists()) ioFile.createNewFile()
-            val virtual: VirtualFile? = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
-            virtual?.setBinaryContent(text.toByteArray(StandardCharsets.UTF_8))
+            val virtual = LocalFileSystem.getInstance().refreshAndFindFileByIoFile(ioFile)
+                ?: error("VFS could not resolve newly created file: $path")
+            virtual.setBinaryContent(text.toByteArray(StandardCharsets.UTF_8))
         }
     }
 

@@ -9,23 +9,11 @@ import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.components.service
 import com.intellij.openapi.ui.popup.JBPopupFactory
 
-/**
- * Entry point shown in the Tools menu, the right-side main toolbar and via
- * the Ctrl+Alt+Q shortcut.
- *
- * The action does not run any CLI itself: it shows a popup chooser of agents
- * defined in [CliqSettings], and delegates the actual launch to
- * [CliqTerminalLauncher]. Splitting "what to run" from "how to run it" keeps
- * the action thin and lets the launcher be reused (for example by a future
- * tool window button).
- */
 class CliqAgentAction : AnAction() {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
 
     override fun update(e: AnActionEvent) {
-        // Disable the action when no project is open – we need a base directory
-        // and a tool window to attach the terminal to.
         e.presentation.isEnabledAndVisible = e.project != null
     }
 
@@ -57,8 +45,6 @@ class CliqAgentAction : AnAction() {
             }
             .createPopup()
 
-        // Anchor to the action's source component when invoked from a toolbar,
-        // otherwise centre on the focused window.
         val component = e.inputEvent?.component
         if (component != null) {
             popup.showUnderneathOf(component)

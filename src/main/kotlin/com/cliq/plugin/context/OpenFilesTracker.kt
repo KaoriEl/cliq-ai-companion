@@ -24,33 +24,15 @@ import com.intellij.openapi.vfs.newvfs.events.VFilePropertyChangeEvent
 import com.intellij.util.Alarm
 import com.intellij.util.messages.Topic
 import java.util.EventListener
-import java.util.concurrent.CopyOnWriteArrayList
 
-/**
- * Project-scoped service that mirrors the editor's open-files state into a
- * compact [WorkspaceContext] snapshot suitable for shipping to a CLI agent.
- *
- * Three signals are tracked:
- *   1. **File lifecycle** — open / close / rename / delete via the editor
- *      manager listener and VFS bulk listener.
- *   2. **Active file selection** — `selectionChanged` fires when the user
- *      switches editor tabs.
- *   3. **Cursor position and selected text** — caret/selection multicaster
- *      listeners attached to [EditorFactory], scoped to the active file only
- *      to avoid noise from background editors.
- *
- * All mutations are debounced (50 ms) before being broadcast on the message
- * bus, so a single user keystroke that triggers caret + selection events
- * yields a single `onContextChanged` notification.
- */
 @Service(Service.Level.PROJECT)
 class OpenFilesTracker(private val project: Project) : Disposable {
 
     private val log = logger<OpenFilesTracker>()
+    private val lock = Any()
     private val files = mutableListOf<MutableTrackedFile>()
     private val connection = project.messageBus.connect(this)
     private val alarm = Alarm(Alarm.ThreadToUse.POOLED_THREAD, this)
-    private val listeners = CopyOnWriteArrayList<WorkspaceContextListener>()
 
     interface WorkspaceContextListener : EventListener {
         fun onContextChanged(context: WorkspaceContext)
@@ -80,21 +62,27 @@ class OpenFilesTracker(private val project: Project) : Disposable {
 
         EditorFactory.getInstance().eventMulticaster.addCaretListener(object : CaretListener {
             override fun caretPositionChanged(event: CaretEvent) {
+                if (event.editor.project != project) return
                 val file = event.editor.virtualFile ?: return
-                val active = files.firstOrNull { it.isActive } ?: return
-                if (active.path != file.path) return
-                val pos = event.newPosition
-                active.cursor = CursorPosition(pos.line + 1, pos.column)
+                synchronized(lock) {
+                    val active = files.firstOrNull { it.isActive } ?: return
+                    if (active.path != file.path) return
+                    val pos = event.newPosition
+                    active.cursor = CursorPosition(pos.line + 1, pos.column)
+                }
                 scheduleNotify()
             }
         }, this)
 
         EditorFactory.getInstance().eventMulticaster.addSelectionListener(object : SelectionListener {
             override fun selectionChanged(event: SelectionEvent) {
+                if (event.editor.project != project) return
                 val file = event.editor.virtualFile ?: return
-                val active = files.firstOrNull { it.isActive } ?: return
-                if (active.path != file.path) return
-                active.selectedText = event.editor.selectionModel.selectedText?.let(::truncate)
+                synchronized(lock) {
+                    val active = files.firstOrNull { it.isActive } ?: return
+                    if (active.path != file.path) return
+                    active.selectedText = event.editor.selectionModel.selectedText?.let(::truncate)
+                }
                 scheduleNotify()
             }
         }, this)
@@ -102,92 +90,85 @@ class OpenFilesTracker(private val project: Project) : Disposable {
         connection.subscribe(VirtualFileManager.VFS_CHANGES, object : BulkFileListener {
             override fun after(events: List<VFileEvent>) {
                 var changed = false
-                for (event in events) {
-                    when (event) {
-                        is VFileDeleteEvent -> {
-                            if (files.removeIf { it.path == event.file.path }) changed = true
-                        }
-                        is VFilePropertyChangeEvent -> {
-                            if (event.propertyName != VirtualFile.PROP_NAME) continue
-                            val parent = event.file.parent?.path ?: continue
-                            val oldName = event.oldValue as? String ?: continue
-                            val oldPath = "$parent/$oldName"
-                            files.firstOrNull { it.path == oldPath }?.let {
-                                it.path = event.file.path
-                                it.openedAt = System.currentTimeMillis()
-                                changed = true
+                synchronized(lock) {
+                    for (event in events) {
+                        when (event) {
+                            is VFileDeleteEvent -> {
+                                if (files.removeIf { it.path == event.file.path }) changed = true
                             }
+                            is VFilePropertyChangeEvent -> {
+                                if (event.propertyName != VirtualFile.PROP_NAME) continue
+                                val parent = event.file.parent?.path ?: continue
+                                val oldName = event.oldValue as? String ?: continue
+                                val oldPath = "$parent/$oldName"
+                                files.firstOrNull { it.path == oldPath }?.let {
+                                    it.path = event.file.path
+                                    it.openedAt = System.currentTimeMillis()
+                                    changed = true
+                                }
+                            }
+                            else -> {}
                         }
-                        else -> {}
                     }
                 }
                 if (changed) scheduleNotify()
             }
         })
 
-        // Seed with already-open files (e.g., the IDE was reopened with state).
-        FileEditorManager.getInstance(project).selectedFiles.forEach { promote(it) }
-        if (files.isNotEmpty()) scheduleNotify()
+        ApplicationManager.getApplication().invokeLater {
+            FileEditorManager.getInstance(project).selectedFiles.forEach { promote(it) }
+            if (synchronized(lock) { files.isNotEmpty() }) scheduleNotify()
+        }
     }
 
-    /**
-     * Returns an immutable snapshot of the current workspace state. Safe to
-     * call from any thread; reads are consistent because we always mutate the
-     * underlying list on the EDT (via platform listeners) or pooled thread.
-     */
-    fun snapshot(): WorkspaceContext = WorkspaceContext(
-        openFiles = files.map { it.toImmutable() },
-        isTrusted = project.isTrusted(),
-    )
-
-    fun addListener(listener: WorkspaceContextListener) {
-        listeners.add(listener)
-    }
-
-    fun removeListener(listener: WorkspaceContextListener) {
-        listeners.remove(listener)
+    fun snapshot(): WorkspaceContext = synchronized(lock) {
+        WorkspaceContext(
+            openFiles = files.map { it.toImmutable() },
+            isTrusted = project.isTrusted(),
+        )
     }
 
     private fun promote(file: VirtualFile): Boolean {
         if (!file.isInLocalFileSystem) return false
-
-        // Only one file is "active" at a time; clear cursor/selection on the
-        // previous one because those values are meaningless once it's
-        // backgrounded.
-        files.firstOrNull { it.isActive }?.apply {
-            isActive = false
-            cursor = null
-            selectedText = null
+        synchronized(lock) {
+            files.firstOrNull { it.isActive }?.apply {
+                isActive = false
+                cursor = null
+                selectedText = null
+            }
+            val existing = files.indexOfFirst { it.path == file.path }
+            if (existing != -1) files.removeAt(existing)
+            files.add(0, MutableTrackedFile(file.path, System.currentTimeMillis(), isActive = true))
+            if (files.size > MAX_TRACKED_FILES) files.removeAt(files.lastIndex)
         }
-
-        val existing = files.indexOfFirst { it.path == file.path }
-        if (existing != -1) files.removeAt(existing)
-
-        files.add(0, MutableTrackedFile(file.path, System.currentTimeMillis(), isActive = true))
-        if (files.size > MAX_TRACKED_FILES) files.removeAt(files.lastIndex)
-
         seedActiveContextFromEditor(file)
         return true
     }
 
-    private fun forget(file: VirtualFile): Boolean = files.removeIf { it.path == file.path }
+    private fun forget(file: VirtualFile): Boolean = synchronized(lock) {
+        files.removeIf { it.path == file.path }
+    }
 
     private fun seedActiveContextFromEditor(file: VirtualFile) {
-        val active = files.firstOrNull { it.path == file.path && it.isActive } ?: return
         val editor = (FileEditorManager.getInstance(project).getEditors(file)
             .firstOrNull() as? TextEditor)?.editor ?: return
         
         ApplicationManager.getApplication().runReadAction {
             val caret = editor.caretModel.currentCaret
-            active.cursor = CursorPosition(caret.logicalPosition.line + 1, caret.logicalPosition.column)
-            active.selectedText = editor.selectionModel.selectedText?.let(::truncate)
+            val line = caret.logicalPosition.line + 1
+            val col = caret.logicalPosition.column
+            val text = editor.selectionModel.selectedText?.let(::truncate)
+            synchronized(lock) {
+                val active = files.firstOrNull { it.path == file.path && it.isActive } ?: return@runReadAction
+                active.cursor = CursorPosition(line, col)
+                active.selectedText = text
+            }
         }
     }
 
     private fun truncate(text: String): String {
         if (text.length <= MAX_SELECTION_LENGTH) return text
         var cut = MAX_SELECTION_LENGTH
-        // Don't slice in the middle of a UTF-16 surrogate pair.
         if (cut > 0 && Character.isHighSurrogate(text[cut - 1])) cut--
         return text.take(cut) + "… [truncated]"
     }
@@ -196,14 +177,14 @@ class OpenFilesTracker(private val project: Project) : Disposable {
         alarm.cancelAllRequests()
         alarm.addRequest({
             val snapshot = snapshot()
-            listeners.forEach { runCatching { it.onContextChanged(snapshot) }.onFailure { log.warn(it) } }
             project.messageBus.syncPublisher(TOPIC).onContextChanged(snapshot)
-        }, 50)
+        }, 250)
     }
 
     override fun dispose() {
-        listeners.clear()
-        files.clear()
+        synchronized(lock) {
+            files.clear()
+        }
     }
 
     private class MutableTrackedFile(

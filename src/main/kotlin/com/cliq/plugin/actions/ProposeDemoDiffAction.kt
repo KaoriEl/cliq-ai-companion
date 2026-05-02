@@ -7,17 +7,10 @@ import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.vfs.VfsUtil
 
-/**
- * Sanity-check action: take the currently focused file, prepend a comment
- * line to it, and open the result in a Cliq diff review. Lets the developer
- * exercise the Accept/Reject UX without wiring a real CLI.
- *
- * The action is registered under Tools | Cliq Demo Diff and is intentionally
- * named so it's discoverable but obvious that it's a development helper.
- */
 class ProposeDemoDiffAction : AnAction() {
 
     override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
@@ -32,12 +25,16 @@ class ProposeDemoDiffAction : AnAction() {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
         if (!file.isInLocalFileSystem) return
 
-        val current = runCatching { VfsUtil.loadText(file) }.getOrElse {
+        val current = runCatching {
+            ApplicationManager.getApplication().runReadAction<String> {
+                VfsUtil.loadText(file)
+            }
+        }.getOrElse {
             notify(project, "Cannot read file: ${it.message}")
             return
         }
 
-        val proposed = "// Suggested by Cliq (demo) — feel free to edit, then click Accept.\n$current"
+        val proposed = "$current"
         project.service<CliqDiffManager>().showDiff(file.path, proposed)
     }
 
