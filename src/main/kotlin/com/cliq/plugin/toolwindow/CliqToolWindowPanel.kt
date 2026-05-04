@@ -66,7 +66,7 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
 
         fun buildSection(title: String, model: CollectionListModel<VirtualFile>, isPinned: Boolean): JPanel {
             val list = JBList(model).apply {
-                cellRenderer = CliqFileCellRenderer(basePath, isPinned)
+                cellRenderer = CliqFileCellRenderer(basePath)
                 emptyText.text = if (isPinned) "Drag files here" else "No recent files"
                 background = CliqTheme.SURFACE
 
@@ -77,11 +77,12 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
                         val rect = getCellBounds(index, index)
                         val file = model.getElementAt(index)
 
-                        if (e.x > rect.width - 25 && isPinned) {
-                            model.remove(file)
-                        } else if (e.x > rect.width - (if (isPinned) 50 else 25)) {
-                            val rel = PathUtil.toRelativePosix(basePath, file.path) ?: return
-                            TerminalTyper.typeInActiveTerminal(project, " @${CliPathEscaper.escape(rel)} ")
+                        when {
+                            e.x > rect.width - 25 -> model.remove(file)
+                            e.x > rect.width - 50 -> {
+                                val rel = PathUtil.toRelativePosix(basePath, file.path) ?: return
+                                TerminalTyper.typeInActiveTerminal(project, " @${CliPathEscaper.escape(rel)} ")
+                            }
                         }
                     }
                 })
@@ -110,6 +111,16 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
                     })
                 })
             }
+
+            headerActions.add(JLabel(AllIcons.Actions.GC).apply {
+                toolTipText = if (isPinned) "Clear context" else "Clear recent files"
+                cursor = Cursor.getPredefinedCursor(Cursor.HAND_CURSOR)
+                addMouseListener(object : java.awt.event.MouseAdapter() {
+                    override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                        if (model.size > 0) model.removeAll()
+                    }
+                })
+            })
 
             val header = JPanel(BorderLayout()).apply {
                 isOpaque = false
@@ -176,10 +187,10 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
     }
 
     private fun buildTopToolbar(launcher: CliqTerminalLauncher): JPanel {
-        val agents = CliqSettings.getInstance().agents()
+        val initialAgents = CliqSettings.getInstance().agents()
 
         val agentCombo = com.intellij.openapi.ui.ComboBox(
-            agents.map { it.displayName }.toTypedArray()
+            initialAgents.map { it.displayName }.toTypedArray()
         ).apply {
             isOpaque = false
         }
@@ -187,10 +198,8 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
         val startBtn = CliqButton("Start", CliqButton.Variant.GHOST).apply {
             addActionListener {
                 val agentsNow = CliqSettings.getInstance().agents()
-                val selectedAgent = agentsNow.getOrNull(agentCombo.selectedIndex)
-                if (selectedAgent != null) {
-                    launcher.launch(selectedAgent)
-                }
+                val selectedAgent = agentsNow.getOrNull(agentCombo.selectedIndex) ?: return@addActionListener
+                launcher.launch(selectedAgent)
             }
         }
 
@@ -332,10 +341,15 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
 
             promptArea.addKeyListener(object : java.awt.event.KeyAdapter() {
                 override fun keyPressed(e: java.awt.event.KeyEvent) {
-                    if (e.keyCode == java.awt.event.KeyEvent.VK_ENTER && !e.isShiftDown) {
+                    if (e.keyCode != java.awt.event.KeyEvent.VK_ENTER) return
+                    if (e.isShiftDown) {
                         e.consume()
-                        sendPrompt()
+                        val caretPos = promptArea.caretPosition
+                        promptArea.document.insertString(caretPos, "\n", null)
+                        return
                     }
+                    e.consume()
+                    sendPrompt()
                 }
             })
         }

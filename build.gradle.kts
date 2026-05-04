@@ -50,6 +50,7 @@ intellijPlatform {
     pluginConfiguration {
         ideaVersion {
             sinceBuild.set("243")
+            untilBuild.set(provider { null })
         }
     }
 }
@@ -57,6 +58,22 @@ intellijPlatform {
 tasks {
     buildSearchableOptions {
         enabled = false
+    }
+
+    val buildPluginTarGz = register<Tar>("buildPluginTarGz") {
+        group = "distribution"
+        description = "Упаковывает плагин в tar.gz архив."
+
+        from(zipTree(buildPlugin.flatMap { it.archiveFile }))
+
+        archiveExtension.set("tar.gz")
+        compression = Compression.GZIP
+
+        destinationDirectory.set(buildPlugin.flatMap { it.destinationDirectory })
+    }
+
+    build {
+        dependsOn(buildPluginTarGz)
     }
 
     signPlugin {

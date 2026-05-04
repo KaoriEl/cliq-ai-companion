@@ -11,13 +11,12 @@ import javax.swing.*
 
 class CliqFileCellRenderer(
     private val basePath: String?,
-    private val isPinned: Boolean
 ) : JPanel(BorderLayout()), ListCellRenderer<VirtualFile> {
 
     private val nameLabel = JBLabel().apply { font = CliqTheme.captionFont(font) }
     private val actionsPanel = JPanel(FlowLayout(FlowLayout.RIGHT, 6, 0)).apply { isOpaque = false }
-    
-    private val sendBtn = JLabel(AllIcons.Actions.Execute) 
+
+    private val sendBtn = JLabel(AllIcons.Actions.Execute)
     private val deleteBtn = JLabel(AllIcons.Actions.GC)
 
     init {
@@ -25,9 +24,8 @@ class CliqFileCellRenderer(
         border = JBUI.Borders.empty(4, 8)
         add(nameLabel, BorderLayout.CENTER)
         add(actionsPanel, BorderLayout.EAST)
-        
         actionsPanel.add(sendBtn)
-        if (isPinned) actionsPanel.add(deleteBtn)
+        actionsPanel.add(deleteBtn)
     }
 
     override fun getListCellRendererComponent(
@@ -37,10 +35,10 @@ class CliqFileCellRenderer(
         val relPath = PathUtil.toRelativePosix(basePath, value.path) ?: value.name
         nameLabel.text = relPath
         nameLabel.icon = value.fileType.icon
-        
+
         background = if (isSelected) CliqTheme.SURFACE_HOVER else CliqTheme.SURFACE
         nameLabel.foreground = if (isSelected) CliqTheme.PRIMARY_TEXT else CliqTheme.SECONDARY_TEXT
-        
+
         actionsPanel.isVisible = isSelected
         return this
     }
