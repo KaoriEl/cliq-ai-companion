@@ -4,9 +4,11 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.util.concurrency.EdtScheduledExecutorService
 import com.jediterm.terminal.ui.JediTermWidget
 import java.awt.Component
 import java.awt.Container
+import java.util.concurrent.TimeUnit
 
 internal object TerminalTyper {
 
@@ -32,15 +34,15 @@ internal object TerminalTyper {
             val widget = findJediTermWidget(component ?: return) ?: return
             val starter = widget.terminalStarter ?: return
 
-            val isMultiline = text.contains("\n")
-            val payload = buildString {
-                if (isMultiline) append("\u001B[200~")
-                append(text)
-                if (isMultiline) append("\u001B[201~")
-                if (execute) append("\r")
-            }
-
+            val payload = "[200~" + text + "[201~"
             starter.sendString(payload, false)
+
+            if (execute) {
+                EdtScheduledExecutorService.getInstance().schedule(
+                    { runCatching { starter.sendString("\r", false) } },
+                    60, TimeUnit.MILLISECONDS,
+                )
+            }
         } catch (e: Exception) {
             log.warn(e)
         }

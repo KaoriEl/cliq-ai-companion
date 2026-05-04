@@ -120,25 +120,26 @@ class CliqDiffManager(private val project: Project) : Disposable {
         val finalText = readRightSideText(filePath) ?: review.proposedContent
         try {
             writeFile(filePath, finalText)
+            finishReviewAfterRemoved(filePath, CliqDiffOutcome.Accepted(filePath, finalText))
         } catch (t: Throwable) {
             log.warn("Failed to write $filePath", t)
             notifyError("Failed to apply changes to $filePath: ${t.message ?: t.javaClass.simpleName}")
-            return
+            finishReviewAfterRemoved(filePath, CliqDiffOutcome.Rejected(filePath))
         }
-        finishReviewAfterRemoved(filePath, CliqDiffOutcome.Accepted(filePath, finalText))
     }
 
     fun applyDirectly(filePath: String, newContent: String) {
         ApplicationManager.getApplication().invokeLater {
-            try {
+            val outcome: CliqDiffOutcome = try {
                 writeFile(filePath, newContent)
-                val outcome = CliqDiffOutcome.Accepted(filePath, newContent)
-                listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
-                project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
+                CliqDiffOutcome.Accepted(filePath, newContent)
             } catch (t: Throwable) {
                 log.warn("Failed to auto-apply $filePath", t)
                 notifyError("Failed to auto-apply changes to $filePath: ${t.message ?: t.javaClass.simpleName}")
+                CliqDiffOutcome.Rejected(filePath)
             }
+            listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
+            project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
         }
     }
 

@@ -31,7 +31,7 @@
 
 ## Overview
 
-Claude Code and Gemini CLI are powerful tools, but using them inside an IDE often means switching between terminal, editor, and project files.
+Claude Code, Gemini CLI, Qwen Code are powerful tools, but using them inside an IDE often means switching between terminal, editor, and project files.
 
 Cliq removes that friction. It runs agents inside the JetBrains terminal, shares active workspace context, and turns AI-generated edits into real IDE diffs you can inspect, modify, accept, or reject.
 
@@ -42,7 +42,7 @@ Cliq does not replace your agent or bundle a model. It adds the missing IDE inte
 ## Key Features
 
 - **One-click agent launcher**  
-  Start Claude or Gemini from the tool window, toolbar, Tools menu, or `Ctrl+Alt+Q`.
+  Start Claude, Gemini, Qwen from the tool window, toolbar, Tools menu, or `Ctrl+Alt+Q`.
 
 - **Native IDE diff reviews**  
   AI changes open as side-by-side diffs with syntax highlighting, editable proposals, and per-hunk actions.
@@ -110,6 +110,7 @@ Install one or both:
 
 - Claude Code (`claude`)
 - Gemini CLI (`gemini`)
+- Qwen CLI (`qwen`)
 
 Executables can be resolved through `PATH` or configured manually in Settings.
 
@@ -128,3 +129,5 @@ Set commands such as:
 ```bash
 claude
 gemini
+qwen
+```

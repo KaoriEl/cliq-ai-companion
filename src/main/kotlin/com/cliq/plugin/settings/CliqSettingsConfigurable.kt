@@ -14,6 +14,7 @@ class CliqSettingsConfigurable : Configurable {
 
     private var claudeField: JBTextField? = null
     private var geminiField: JBTextField? = null
+    private var qwenField: JBTextField? = null
     private var autoApplyBox: javax.swing.JCheckBox? = null
 
     override fun getDisplayName(): String = "Cliq"
@@ -21,7 +22,9 @@ class CliqSettingsConfigurable : Configurable {
     override fun createComponent(): JComponent {
         val claude = JBTextField(settings.claudeCommand, 30).also { claudeField = it }
         val gemini = JBTextField(settings.geminiCommand, 30).also { geminiField = it }
-        val autoApply = javax.swing.JCheckBox("Auto-apply changes without review", settings.autoApplyChanges).also { autoApplyBox = it }
+        val qwen   = JBTextField(settings.qwenCommand,   30).also { qwenField   = it }
+        val autoApply = javax.swing.JCheckBox("Auto-apply changes without review", settings.autoApplyChanges)
+            .also { autoApplyBox = it }
 
         return panel {
             row("Claude CLI command:") {
@@ -36,6 +39,12 @@ class CliqSettingsConfigurable : Configurable {
             row {
                 comment("Executable name or absolute path. Example: gemini, /opt/homebrew/bin/gemini")
             }
+            row("Qwen CLI command:") {
+                cell(qwen).columns(30)
+            }.layout(RowLayout.LABEL_ALIGNED)
+            row {
+                comment("Executable name or absolute path for Qwen Code CLI. Example: qwen")
+            }
             row {
                 cell(autoApply)
             }
@@ -48,31 +57,39 @@ class CliqSettingsConfigurable : Configurable {
     override fun isModified(): Boolean {
         val claude = claudeField?.text ?: return false
         val gemini = geminiField?.text ?: return false
+        val qwen   = qwenField?.text   ?: return false
         val autoApply = autoApplyBox?.isSelected ?: return false
-        return claude != settings.claudeCommand || gemini != settings.geminiCommand || autoApply != settings.autoApplyChanges
+        return claude != settings.claudeCommand
+            || gemini != settings.geminiCommand
+            || qwen   != settings.qwenCommand
+            || autoApply != settings.autoApplyChanges
     }
 
     override fun apply() {
         val claude = claudeField?.text?.trim().orEmpty()
         val gemini = geminiField?.text?.trim().orEmpty()
+        val qwen   = qwenField?.text?.trim().orEmpty()
         val autoApply = autoApplyBox?.isSelected ?: false
-        if (claude.isEmpty() && gemini.isEmpty()) {
+        if (claude.isEmpty() && gemini.isEmpty() && qwen.isEmpty()) {
             throw ConfigurationException("At least one CLI command must be configured.")
         }
         settings.claudeCommand = claude
         settings.geminiCommand = gemini
+        settings.qwenCommand   = qwen
         settings.autoApplyChanges = autoApply
     }
 
     override fun reset() {
         claudeField?.text = settings.claudeCommand
         geminiField?.text = settings.geminiCommand
+        qwenField?.text   = settings.qwenCommand
         autoApplyBox?.isSelected = settings.autoApplyChanges
     }
 
     override fun disposeUIResources() {
         claudeField = null
         geminiField = null
+        qwenField   = null
         autoApplyBox = null
     }
 }
