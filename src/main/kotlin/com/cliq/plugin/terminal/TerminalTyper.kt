@@ -4,7 +4,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindowManager
-import com.intellij.util.concurrency.EdtScheduledExecutorService
+import com.intellij.util.concurrency.AppExecutorUtil
 import com.jediterm.terminal.ui.JediTermWidget
 import java.awt.Component
 import java.awt.Container
@@ -38,7 +38,7 @@ internal object TerminalTyper {
             starter.sendString(payload, false)
 
             if (execute) {
-                EdtScheduledExecutorService.getInstance().schedule(
+                AppExecutorUtil.getAppScheduledExecutorService().schedule(
                     { runCatching { starter.sendString("\r", false) } },
                     60, TimeUnit.MILLISECONDS,
                 )
