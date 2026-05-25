@@ -67,6 +67,9 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
         recentList = JBList(recentFilesModel)
         pinnedList = JBList(pinnedFilesModel)
 
+        ToolTipManager.sharedInstance().registerComponent(recentList)
+        ToolTipManager.sharedInstance().registerComponent(pinnedList)
+
         project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
             override fun selectionChanged(event: FileEditorManagerEvent) {
                 val file = event.newFile ?: return
