@@ -86,7 +86,6 @@
             text="Cliq: Send Files as @-Context to Terminal"
             description="Inserts @relative/path tokens for the selected files into the active terminal session">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
-            <keyboard-shortcut keymap="$default" first-keystroke="shift B"/>
         </action>
     </actions>
 </idea-plugin>

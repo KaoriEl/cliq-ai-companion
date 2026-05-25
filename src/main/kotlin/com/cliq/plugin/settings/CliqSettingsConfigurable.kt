@@ -3,6 +3,7 @@ package com.cliq.plugin.settings
 import com.intellij.openapi.options.Configurable
 import com.intellij.ui.components.JBTextField
 import com.intellij.openapi.options.ConfigurationException
+import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.ui.dsl.builder.RowLayout
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
@@ -50,6 +51,16 @@ class CliqSettingsConfigurable : Configurable {
             }
             row {
                 comment("If enabled, proposed code changes will be written directly to disk.")
+            }
+            
+            separator()
+            row("Keyboard Shortcuts:") {
+                link("Configure shortcuts in Keymap...") {
+                    ShowSettingsUtil.getInstance().showSettingsDialog(null, "Keymap")
+                }
+            }
+            row {
+                comment("Search for 'Cliq: Send Files' to assign a custom shortcut.")
             }
         }
     }
