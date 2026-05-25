@@ -33,7 +33,8 @@ class CliqFileCellRenderer(
         isSelected: Boolean, cellHasFocus: Boolean
     ): Component {
         val relPath = PathUtil.toRelativePosix(basePath, value.path) ?: value.name
-        nameLabel.text = relPath
+        nameLabel.text = value.name
+        this.toolTipText = relPath
         nameLabel.icon = value.fileType.icon
 
         background = if (isSelected) CliqTheme.SURFACE_HOVER else CliqTheme.SURFACE

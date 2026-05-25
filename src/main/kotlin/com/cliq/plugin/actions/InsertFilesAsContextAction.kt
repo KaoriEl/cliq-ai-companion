@@ -3,11 +3,7 @@ package com.cliq.plugin.actions
 import com.cliq.plugin.terminal.TerminalTyper
 import com.cliq.plugin.util.CliPathEscaper
 import com.cliq.plugin.util.PathUtil
-import com.intellij.openapi.actionSystem.ActionUpdateThread
-import com.intellij.openapi.actionSystem.AnAction
-import com.intellij.openapi.actionSystem.AnActionEvent
-import com.intellij.openapi.actionSystem.CommonDataKeys
-import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.project.DumbAware
 
 class InsertFilesAsContextAction : AnAction(), DumbAware {
@@ -16,10 +12,14 @@ class InsertFilesAsContextAction : AnAction(), DumbAware {
 
     override fun update(e: AnActionEvent) {
         val project = e.project
-        val hasFiles = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY)?.isNotEmpty() == true
-            || e.getData(CommonDataKeys.VIRTUAL_FILE) != null
-            || (project != null && FileEditorManager.getInstance(project).openFiles.isNotEmpty())
-        e.presentation.isEnabledAndVisible = project != null && hasFiles
+        val selectedFiles = e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY)
+        val singleFile = e.getData(CommonDataKeys.VIRTUAL_FILE)
+
+        val hasSelection = (selectedFiles != null && selectedFiles.isNotEmpty()) || singleFile != null
+        val isEditor = e.getData(CommonDataKeys.EDITOR) != null
+        val isValidContext = !isEditor
+
+        e.presentation.isEnabledAndVisible = project != null && hasSelection && isValidContext
     }
 
     override fun actionPerformed(e: AnActionEvent) {
@@ -29,7 +29,6 @@ class InsertFilesAsContextAction : AnAction(), DumbAware {
         val files =
             e.getData(CommonDataKeys.VIRTUAL_FILE_ARRAY)?.takeIf { it.isNotEmpty() }
                 ?: e.getData(CommonDataKeys.VIRTUAL_FILE)?.let { arrayOf(it) }
-                ?: FileEditorManager.getInstance(project).openFiles.takeIf { it.isNotEmpty() }
                 ?: return
 
         val tokens = files

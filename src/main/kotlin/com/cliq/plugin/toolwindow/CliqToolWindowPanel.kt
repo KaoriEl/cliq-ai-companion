@@ -9,6 +9,8 @@ import com.cliq.plugin.util.CliPathEscaper
 import com.cliq.plugin.util.PathUtil
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.actionSystem.DataProvider
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.service
 import com.intellij.openapi.fileChooser.FileChooser
@@ -31,9 +33,26 @@ import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.*
 
-class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindowPanel>(BorderLayout()), Disposable {
+class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindowPanel>(BorderLayout()), Disposable, DataProvider {
+
+    private val recentList: JBList<VirtualFile>
+    private val pinnedList: JBList<VirtualFile>
 
     override fun dispose() {
+    }
+
+    override fun getData(dataId: String): Any? {
+        if (CommonDataKeys.VIRTUAL_FILE_ARRAY.`is`(dataId)) {
+            val selected = mutableListOf<VirtualFile>()
+            selected.addAll(recentList.selectedValuesList)
+            selected.addAll(pinnedList.selectedValuesList)
+            val result = if (selected.isNotEmpty()) selected.toTypedArray() else null
+            return result
+        }
+        if (CommonDataKeys.VIRTUAL_FILE.`is`(dataId)) {
+            return pinnedList.selectedValue ?: recentList.selectedValue
+        }
+        return null
     }
 
     init {
@@ -44,6 +63,12 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
 
         val recentFilesModel = CollectionListModel<VirtualFile>()
         val pinnedFilesModel = CollectionListModel<VirtualFile>()
+
+        recentList = JBList(recentFilesModel)
+        pinnedList = JBList(pinnedFilesModel)
+
+        ToolTipManager.sharedInstance().registerComponent(recentList)
+        ToolTipManager.sharedInstance().registerComponent(pinnedList)
 
         project.messageBus.connect(this).subscribe(FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
             override fun selectionChanged(event: FileEditorManagerEvent) {
@@ -64,8 +89,9 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
             TerminalTyper.typeInActiveTerminal(project, " $payload")
         }
 
-        fun buildSection(title: String, model: CollectionListModel<VirtualFile>, isPinned: Boolean): JPanel {
-            val list = JBList(model).apply {
+        fun buildSection(title: String, list: JBList<VirtualFile>, isPinned: Boolean): JPanel {
+            val model = list.model as CollectionListModel<VirtualFile>
+            list.apply {
                 cellRenderer = CliqFileCellRenderer(basePath)
                 emptyText.text = if (isPinned) "Drag files here" else "No recent files"
                 background = CliqTheme.SURFACE
@@ -147,8 +173,8 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
         }
 
         val filesSplitter = com.intellij.ui.JBSplitter(false, 0.5f).apply {
-            firstComponent = buildSection("Recently opened", recentFilesModel, false)
-            secondComponent = buildSection("Context", pinnedFilesModel, true)
+            firstComponent = buildSection("Recently opened", recentList, false)
+            secondComponent = buildSection("Context", pinnedList, true)
         }
 
         dropZone.add(filesSplitter, BorderLayout.CENTER)
