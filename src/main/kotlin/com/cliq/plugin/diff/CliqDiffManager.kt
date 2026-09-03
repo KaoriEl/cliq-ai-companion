@@ -46,9 +46,15 @@ class CliqDiffManager(private val project: Project) : Disposable {
         fun onDiffOutcome(outcome: CliqDiffOutcome)
     }
 
+    interface PendingReviewsListener : EventListener {
+        fun onPendingReviewsChanged(pendingFilePaths: List<String>)
+    }
+
     companion object {
         val FILE_PATH_KEY: Key<String> = Key.create("cliq.diff.filePath")
         val TOPIC: Topic<DiffListener> = Topic.create("Cliq Diff Outcome", DiffListener::class.java)
+        val PENDING_TOPIC: Topic<PendingReviewsListener> =
+            Topic.create("Cliq Diff Pending Changed", PendingReviewsListener::class.java)
     }
 
     init {
@@ -69,6 +75,23 @@ class CliqDiffManager(private val project: Project) : Disposable {
 
     fun addListener(listener: DiffListener) { listeners.add(listener) }
     fun removeListener(listener: DiffListener) { listeners.remove(listener) }
+
+    fun pendingFilePaths(): List<String> = reviews.keys.toList()
+
+    fun acceptAll() {
+        pendingFilePaths().forEach { accept(it) }
+    }
+
+    fun rejectAll() {
+        pendingFilePaths().forEach { reject(it) }
+    }
+
+    fun focusDiff(filePath: String) {
+        val virtualFile = findDiffVirtualFile(filePath) ?: return
+        ApplicationManager.getApplication().invokeLater {
+            FileEditorManager.getInstance(project).openFile(virtualFile, true)
+        }
+    }
 
     fun showDiff(filePath: String, proposedContent: String) {
         if (reviews.containsKey(filePath)) {
@@ -103,6 +126,7 @@ class CliqDiffManager(private val project: Project) : Disposable {
         )
 
         reviews[filePath] = ReviewState(filePath, proposedContent)
+        notifyPendingChanged()
 
         val chain = SimpleDiffRequestChain(request)
         val virtualFile = ChainDiffVirtualFile(chain, title)
@@ -162,8 +186,13 @@ class CliqDiffManager(private val project: Project) : Disposable {
 
     private fun finishReviewAfterRemoved(filePath: String, outcome: CliqDiffOutcome) {
         closeDiffTab(filePath)
+        notifyPendingChanged()
         listeners.forEach { runCatching { it.onDiffOutcome(outcome) }.onFailure { log.warn(it) } }
         project.messageBus.syncPublisher(TOPIC).onDiffOutcome(outcome)
+    }
+
+    private fun notifyPendingChanged() {
+        project.messageBus.syncPublisher(PENDING_TOPIC).onPendingReviewsChanged(pendingFilePaths())
     }
 
     private fun readRightSideText(filePath: String): String? {

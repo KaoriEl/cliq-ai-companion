@@ -28,6 +28,7 @@ dependencies {
     intellijPlatform {
         create("IC", platformVersion)
         bundledPlugin("org.jetbrains.plugins.terminal")
+        bundledModule("intellij.platform.vcs.impl")
         instrumentationTools()
         testFramework(TestFrameworkType.Platform)
     }
@@ -52,6 +53,17 @@ intellijPlatform {
             sinceBuild.set("243")
             untilBuild.set(provider { null })
         }
+        changeNotes.set("""
+            This update adds a multi-file review queue, AI-drafted commit messages, prompt history, and smarter templates.<br>
+            <br>
+            Highlights:<br>
+            <ul>
+              <li>New "Pending Changes" panel reviews every open diff from an agent session at once, with Accept All / Reject All</li>
+              <li>"Cliq: Generate Commit Message" builds a diff of your changes and drafts a ready-to-send prompt for your agent</li>
+              <li>Chat input now keeps a per-project prompt history you can reinsert or clear</li>
+              <li>Prompt templates support {{activeFile}}, {{selection}}, and {{clipboard}} placeholders</li>
+            </ul>
+        """.trimIndent())
     }
 }
 

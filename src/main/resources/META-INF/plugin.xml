@@ -12,6 +12,7 @@
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.vcs</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
 
     <extensions defaultExtensionNs="com.intellij">
@@ -86,6 +87,14 @@
             text="Cliq: Send Files as @-Context to Terminal"
             description="Inserts @relative/path tokens for the selected files into the active terminal session">
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+
+        <action
+            id="com.cliq.plugin.GenerateCommitMessage"
+            class="com.cliq.plugin.vcs.GenerateCommitMessageAction"
+            text="Cliq: Generate Commit Message"
+            description="Build a diff of the current changes and draft a prompt for an AI-generated commit message in the Cliq chat input">
+            <add-to-group group-id="ToolsMenu" anchor="after" relative-to-action="com.cliq.plugin.InsertFilesAsContext"/>
         </action>
     </actions>
 </idea-plugin>
