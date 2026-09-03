@@ -42,11 +42,12 @@ class CliAgentTableModel(private val agents: MutableList<CliAgentDefinition>) : 
         fireTableRowsDeleted(rowIndex, rowIndex)
     }
 
-    fun snapshot(): List<CliAgentDefinition> = agents.toList()
+    fun snapshot(): List<CliAgentDefinition> = agents.map { it.deepCopy() }
 
     fun replaceAll(newAgents: List<CliAgentDefinition>) {
+        val detached = newAgents.map { it.deepCopy() }
         agents.clear()
-        agents.addAll(newAgents)
+        agents.addAll(detached)
         fireTableDataChanged()
     }
 }

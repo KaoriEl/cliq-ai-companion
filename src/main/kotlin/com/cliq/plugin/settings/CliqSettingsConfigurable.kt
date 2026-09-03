@@ -2,17 +2,20 @@ package com.cliq.plugin.settings
 
 import com.cliq.plugin.agents.CliAgentDefinition
 import com.intellij.icons.AllIcons
+import com.intellij.openapi.actionSystem.ActionUpdateThread
+import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.options.ShowSettingsUtil
-import com.intellij.ui.AnActionButton
 import com.intellij.ui.ToolbarDecorator
-import com.intellij.ui.table.JBTable
 import com.intellij.ui.dsl.builder.panel
+import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.util.UUID
+import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JPanel
 import javax.swing.ListSelectionModel
@@ -22,15 +25,21 @@ class CliqSettingsConfigurable : Configurable {
     private val settings = CliqSettings.getInstance()
 
     private val workingAgents: MutableList<CliAgentDefinition> = mutableListOf()
+    private val pendingSecrets: MutableMap<String, Map<String, String>> = mutableMapOf()
+
     private var tableModel: CliAgentTableModel? = null
     private var table: JBTable? = null
-    private var autoApplyBox: javax.swing.JCheckBox? = null
+    private var autoApplyBox: JCheckBox? = null
+    private var promptHistoryBox: JCheckBox? = null
+    private var clipboardConfirmBox: JCheckBox? = null
 
     override fun getDisplayName(): String = "Cliq"
 
     override fun createComponent(): JComponent {
         workingAgents.clear()
-        workingAgents.addAll(cloneAgents(settings.agents()))
+        workingAgents.addAll(settings.agents().map { it.deepCopy() })
+        pendingSecrets.clear()
+
         val model = CliAgentTableModel(workingAgents).also { tableModel = it }
 
         val agentsTable = JBTable(model).apply {
@@ -45,23 +54,35 @@ class CliqSettingsConfigurable : Configurable {
             .setRemoveAction { removeSelected() }
             .setEditActionUpdater { agentsTable.selectedRow >= 0 }
             .setRemoveActionUpdater { agentsTable.selectedRow >= 0 }
-            .addExtraAction(object : AnActionButton("Duplicate", AllIcons.Actions.Copy) {
+            .addExtraAction(object : AnAction("Duplicate", "Duplicate the selected agent", AllIcons.Actions.Copy) {
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.EDT
+                override fun update(e: AnActionEvent) {
+                    e.presentation.isEnabled = agentsTable.selectedRow >= 0
+                }
                 override fun actionPerformed(e: AnActionEvent) = duplicateSelected()
-                override fun isEnabled(): Boolean = agentsTable.selectedRow >= 0
             })
             .disableUpDownActions()
             .createPanel()
 
-        val autoApply = javax.swing.JCheckBox("Auto-apply changes without review", settings.autoApplyChanges)
+        val autoApply = JCheckBox("Auto-apply changes without review", settings.autoApplyChanges)
             .also { autoApplyBox = it }
+        val promptHistory = JCheckBox("Keep a history of sent prompts", settings.promptHistoryEnabled)
+            .also { promptHistoryBox = it }
+        val clipboardConfirm = JCheckBox(
+            "Ask before inserting clipboard content into prompts",
+            settings.confirmClipboardPlaceholder,
+        ).also { clipboardConfirmBox = it }
 
         val bottomPanel = panel {
+            row { cell(autoApply) }
             row {
-                cell(autoApply)
+                comment("If enabled, proposed code changes are written directly to disk, inside the project only.")
             }
+            row { cell(promptHistory) }
             row {
-                comment("If enabled, proposed code changes will be written directly to disk.")
+                comment("History is stored per project in workspace.xml. Prompts built from the clipboard are never stored.")
             }
+            row { cell(clipboardConfirm) }
             separator()
             row("Keyboard Shortcuts:") {
                 link("Configure shortcuts in Keymap...") {
@@ -80,37 +101,40 @@ class CliqSettingsConfigurable : Configurable {
         }
     }
 
-    private fun cloneAgents(agents: List<CliAgentDefinition>): List<CliAgentDefinition> =
-        agents.map { it.copy(environmentVariables = it.environmentVariables.toMutableMap()) }
+    private fun environmentOf(agent: CliAgentDefinition): Map<String, String> =
+        pendingSecrets[agent.id] ?: CliqAgentSecrets.load(agent)
 
     private fun addAgent() {
         val model = tableModel ?: return
         val existingNames = model.snapshot().map { it.displayName }.toSet()
-        val dialog = CliAgentEditDialog(CliAgentDefinition(), existingNames)
+        val dialog = CliAgentEditDialog(CliAgentDefinition(), existingNames, emptyMap())
         if (dialog.showAndGet()) {
-            model.addAgent(dialog.buildResult())
+            val created = dialog.buildResult()
+            pendingSecrets[created.id] = dialog.environmentValues()
+            model.addAgent(created)
         }
     }
 
     private fun editSelected() {
         val model = tableModel ?: return
-        val row = table?.selectedRow ?: return
-        if (row < 0) return
+        val row = selectedModelRow() ?: return
         val current = model.agentAt(row)
         val existingNames = model.snapshot()
             .filterIndexed { index, _ -> index != row }
             .map { it.displayName }
             .toSet()
-        val dialog = CliAgentEditDialog(current, existingNames)
+
+        val dialog = CliAgentEditDialog(current, existingNames, environmentOf(current))
         if (dialog.showAndGet()) {
-            model.updateAgent(row, dialog.buildResult())
+            val updated = dialog.buildResult()
+            pendingSecrets[updated.id] = dialog.environmentValues()
+            model.updateAgent(row, updated)
         }
     }
 
     private fun duplicateSelected() {
         val model = tableModel ?: return
-        val row = table?.selectedRow ?: return
-        if (row < 0) return
+        val row = selectedModelRow() ?: return
         val source = model.agentAt(row)
         val existingNames = model.snapshot().map { it.displayName }.toSet()
 
@@ -121,31 +145,41 @@ class CliqSettingsConfigurable : Configurable {
             suffix++
         }
 
-        model.addAgent(
-            source.copy(
-                id = UUID.randomUUID().toString(),
-                displayName = candidateName,
-                environmentVariables = source.environmentVariables.toMutableMap(),
-            )
-        )
+        val sourceEnvironment = environmentOf(source)
+        val duplicate = source.deepCopy().apply {
+            id = UUID.randomUUID().toString()
+            displayName = candidateName
+            environmentKeys = sourceEnvironment.keys.toMutableList()
+            environmentVariables = mutableMapOf()
+        }
+
+        pendingSecrets[duplicate.id] = sourceEnvironment
+        model.addAgent(duplicate)
     }
 
     private fun removeSelected() {
         val model = tableModel ?: return
-        val row = table?.selectedRow ?: return
-        if (row < 0) return
+        val row = selectedModelRow() ?: return
         model.removeAgent(row)
+    }
+
+    private fun selectedModelRow(): Int? {
+        val view = table?.selectedRow ?: return null
+        if (view < 0) return null
+        return table?.convertRowIndexToModel(view)?.takeIf { it >= 0 }
     }
 
     override fun isModified(): Boolean {
         val model = tableModel ?: return false
-        val autoApply = autoApplyBox?.isSelected ?: return false
-        return model.snapshot() != settings.agents() || autoApply != settings.autoApplyChanges
+        return model.snapshot() != settings.agents() ||
+            pendingSecrets.isNotEmpty() ||
+            autoApplyBox?.isSelected != settings.autoApplyChanges ||
+            promptHistoryBox?.isSelected != settings.promptHistoryEnabled ||
+            clipboardConfirmBox?.isSelected != settings.confirmClipboardPlaceholder
     }
 
     override fun apply() {
         val model = tableModel ?: return
-        val autoApply = autoApplyBox?.isSelected ?: false
         val agents = model.snapshot()
 
         if (agents.isEmpty()) {
@@ -163,20 +197,44 @@ class CliqSettingsConfigurable : Configurable {
             throw ConfigurationException("Agent names must be unique. Duplicate name: '${duplicateGroup.first().displayName}'.")
         }
 
+        val removedAgents = settings.agents().filter { previous -> agents.none { it.id == previous.id } }
+        val secretsToWrite = pendingSecrets.toMap()
+        pendingSecrets.clear()
+
         settings.setAgents(agents)
-        settings.autoApplyChanges = autoApply
+        settings.autoApplyChanges = autoApplyBox?.isSelected ?: settings.autoApplyChanges
+        settings.promptHistoryEnabled = promptHistoryBox?.isSelected ?: settings.promptHistoryEnabled
+        settings.confirmClipboardPlaceholder =
+            clipboardConfirmBox?.isSelected ?: settings.confirmClipboardPlaceholder
+
+        ApplicationManager.getApplication().executeOnPooledThread {
+            removedAgents.forEach { CliqAgentSecrets.forget(it.id, it.environmentKeys + it.environmentVariables.keys) }
+            secretsToWrite.forEach { (agentId, environment) ->
+                val stale = settings.agents().firstOrNull { it.id == agentId }
+                    ?.environmentKeys
+                    ?.filterNot { environment.containsKey(it) }
+                    .orEmpty()
+                if (stale.isNotEmpty()) CliqAgentSecrets.forget(agentId, stale)
+                CliqAgentSecrets.store(agentId, environment)
+            }
+        }
     }
 
     override fun reset() {
         workingAgents.clear()
-        workingAgents.addAll(cloneAgents(settings.agents()))
-        tableModel?.replaceAll(workingAgents)
+        pendingSecrets.clear()
+        tableModel?.replaceAll(settings.agents().map { it.deepCopy() })
         autoApplyBox?.isSelected = settings.autoApplyChanges
+        promptHistoryBox?.isSelected = settings.promptHistoryEnabled
+        clipboardConfirmBox?.isSelected = settings.confirmClipboardPlaceholder
     }
 
     override fun disposeUIResources() {
+        pendingSecrets.clear()
         tableModel = null
         table = null
         autoApplyBox = null
+        promptHistoryBox = null
+        clipboardConfirmBox = null
     }
 }

@@ -14,14 +14,20 @@ import javax.swing.JComponent
 class CliAgentEditDialog(
     private val initial: CliAgentDefinition,
     private val existingDisplayNames: Set<String>,
+    initialEnvironment: Map<String, String>,
 ) : DialogWrapper(true) {
+
+    private companion object {
+        val ENVIRONMENT_KEY_PATTERN = Regex("[A-Za-z_][A-Za-z0-9_]*")
+        const val MAX_FIELD_LENGTH = 4_096
+    }
 
     private val displayNameField = JBTextField(initial.displayName, 30)
     private val executableField = JBTextField(initial.executablePath, 30)
     private val argumentsField = JBTextField(initial.argumentsTemplate, 30)
     private val workingDirectoryField = JBTextField(initial.workingDirectory, 30)
     private val environmentArea = JBTextArea(
-        initial.environmentVariables.entries.joinToString("\n") { (key, value) -> "$key=$value" },
+        initialEnvironment.entries.joinToString("\n") { (key, value) -> "$key=$value" },
         6,
         30,
     )
@@ -58,36 +64,67 @@ class CliAgentEditDialog(
             cell(JBScrollPane(environmentArea))
         }
         row {
-            comment("One KEY=VALUE pair per line.")
+            comment(
+                "One KEY=VALUE pair per line. Values are stored in the IDE password safe, " +
+                    "not in plain-text settings, and are passed to the agent's terminal session."
+            )
         }
     }
 
     override fun doValidate(): ValidationInfo? {
         val name = displayNameField.text.trim()
         val executable = executableField.text.trim()
+
         if (name.isEmpty()) return ValidationInfo("Display name must not be empty.", displayNameField)
+        if (name.length > MAX_FIELD_LENGTH) return ValidationInfo("Display name is too long.", displayNameField)
         if (executable.isEmpty()) return ValidationInfo("Executable path must not be empty.", executableField)
+        if (executable.length > MAX_FIELD_LENGTH) return ValidationInfo("Executable path is too long.", executableField)
+        if (argumentsField.text.length > MAX_FIELD_LENGTH) {
+            return ValidationInfo("Arguments are too long.", argumentsField)
+        }
         if (name != initial.displayName && existingDisplayNames.contains(name)) {
             return ValidationInfo("An agent named '$name' already exists.", displayNameField)
         }
-        if (parseEnvironment() == null) {
-            return ValidationInfo("Environment variables must be in KEY=VALUE format, one per line.", environmentArea)
+
+        val workingDirectory = workingDirectoryField.text.trim()
+        if (workingDirectory.isNotEmpty() && !java.io.File(workingDirectory).isDirectory) {
+            return ValidationInfo("Working directory does not exist.", workingDirectoryField)
         }
-        return null
+
+        return validateEnvironment()
     }
 
-    private fun parseEnvironment(): MutableMap<String, String>? {
-        val result = mutableMapOf<String, String>()
+    private fun validateEnvironment(): ValidationInfo? {
         environmentArea.text.lineSequence()
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .forEach { line ->
                 val separatorIndex = line.indexOf('=')
-                if (separatorIndex <= 0) return null
+                if (separatorIndex <= 0) {
+                    return ValidationInfo(
+                        "Environment variables must be in KEY=VALUE format, one per line.",
+                        environmentArea,
+                    )
+                }
                 val key = line.substring(0, separatorIndex).trim()
-                val value = line.substring(separatorIndex + 1).trim()
-                if (key.isEmpty()) return null
-                result[key] = value
+                if (!ENVIRONMENT_KEY_PATTERN.matches(key)) {
+                    return ValidationInfo("'$key' is not a valid environment variable name.", environmentArea)
+                }
+            }
+        return null
+    }
+
+    fun environmentValues(): Map<String, String> {
+        val result = LinkedHashMap<String, String>()
+        environmentArea.text.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .forEach { line ->
+                val separatorIndex = line.indexOf('=')
+                if (separatorIndex <= 0) return@forEach
+                val key = line.substring(0, separatorIndex).trim()
+                if (!ENVIRONMENT_KEY_PATTERN.matches(key)) return@forEach
+                result[key] = line.substring(separatorIndex + 1).trim()
             }
         return result
     }
@@ -97,6 +134,7 @@ class CliAgentEditDialog(
         executablePath = executableField.text.trim(),
         argumentsTemplate = argumentsField.text.trim(),
         workingDirectory = workingDirectoryField.text.trim(),
-        environmentVariables = parseEnvironment() ?: mutableMapOf(),
+        environmentKeys = environmentValues().keys.toMutableList(),
+        environmentVariables = mutableMapOf(),
     )
 }

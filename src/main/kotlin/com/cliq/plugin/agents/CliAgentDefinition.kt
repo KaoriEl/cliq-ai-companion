@@ -7,10 +7,16 @@ data class CliAgentDefinition(
     var displayName: String = "",
     var executablePath: String = "",
     var argumentsTemplate: String = "",
+    var environmentKeys: MutableList<String> = mutableListOf(),
     var environmentVariables: MutableMap<String, String> = mutableMapOf(),
     var workingDirectory: String = "",
 ) {
     fun isValid(): Boolean = displayName.isNotBlank() && executablePath.isNotBlank()
+
+    fun deepCopy(): CliAgentDefinition = copy(
+        environmentKeys = environmentKeys.toMutableList(),
+        environmentVariables = environmentVariables.toMutableMap(),
+    )
 
     companion object {
         const val CLAUDE_ID = "claude"

@@ -20,6 +20,14 @@ class CliqPendingChangeCellRenderer(
     private val acceptBtn = JLabel(AllIcons.Actions.Checked)
     private val rejectBtn = JLabel(AllIcons.Actions.Cancel)
 
+    companion object {
+        const val ACTION_ACCEPT = 0
+        const val ACTION_REJECT = 1
+
+        fun actionZones(): RowActionZones =
+            RowActionZones(listOf(AllIcons.Actions.Checked, AllIcons.Actions.Cancel))
+    }
+
     init {
         isOpaque = true
         border = JBUI.Borders.empty(4, 8)

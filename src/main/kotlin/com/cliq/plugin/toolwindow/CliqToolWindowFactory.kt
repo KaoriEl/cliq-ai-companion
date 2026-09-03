@@ -20,6 +20,7 @@ class CliqToolWindowFactory : ToolWindowFactory, DumbAware {
 
         val gear = DefaultActionGroup().apply {
             add(object : ToggleAction("Auto-apply Changes Without Review") {
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
                 override fun isSelected(e: AnActionEvent) = CliqSettings.getInstance().autoApplyChanges
                 override fun setSelected(e: AnActionEvent, state: Boolean) {
                     CliqSettings.getInstance().autoApplyChanges = state
@@ -27,6 +28,7 @@ class CliqToolWindowFactory : ToolWindowFactory, DumbAware {
             })
             addSeparator()
             add(object : AnAction("Cliq Settings…") {
+                override fun getActionUpdateThread(): ActionUpdateThread = ActionUpdateThread.BGT
                 override fun actionPerformed(e: AnActionEvent) {
                     ShowSettingsUtil.getInstance()
                         .showSettingsDialog(project, CliqSettingsConfigurable::class.java)

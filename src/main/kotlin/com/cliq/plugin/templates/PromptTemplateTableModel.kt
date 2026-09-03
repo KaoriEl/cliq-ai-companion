@@ -41,7 +41,7 @@ class PromptTemplateTableModel(private val templates: MutableList<PromptTemplate
         fireTableRowsDeleted(rowIndex, rowIndex)
     }
 
-    fun snapshot(): List<PromptTemplate> = templates.toList()
+    fun snapshot(): List<PromptTemplate> = templates.map { it.copy() }
 
     override fun addRow() {
         addTemplate(PromptTemplate(title = "New Template"))

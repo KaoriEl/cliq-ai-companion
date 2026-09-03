@@ -19,6 +19,8 @@ class CliqSettings : PersistentStateComponent<CliqSettings.State> {
     class State {
         var agents: MutableList<CliAgentDefinition> = mutableListOf()
         var autoApplyChanges: Boolean = false
+        var promptHistoryEnabled: Boolean = true
+        var confirmClipboardPlaceholder: Boolean = true
     }
 
     interface AgentsListener : EventListener {
@@ -51,38 +53,75 @@ class CliqSettings : PersistentStateComponent<CliqSettings.State> {
         )
     }
 
+    private val lock = Any()
+
+    @Volatile
     private var myState = State()
 
     var autoApplyChanges: Boolean
         get() = myState.autoApplyChanges
         set(value) {
-            myState.autoApplyChanges = value
+            synchronized(lock) { myState.autoApplyChanges = value }
         }
 
-    fun agents(): List<CliAgentDefinition> = myState.agents.toList()
+    var promptHistoryEnabled: Boolean
+        get() = myState.promptHistoryEnabled
+        set(value) {
+            synchronized(lock) { myState.promptHistoryEnabled = value }
+        }
+
+    var confirmClipboardPlaceholder: Boolean
+        get() = myState.confirmClipboardPlaceholder
+        set(value) {
+            synchronized(lock) { myState.confirmClipboardPlaceholder = value }
+        }
+
+    fun agents(): List<CliAgentDefinition> = synchronized(lock) {
+        myState.agents.map { it.deepCopy() }
+    }
 
     fun setAgents(newAgents: List<CliAgentDefinition>) {
-        myState.agents = newAgents.map { it.copy(environmentVariables = it.environmentVariables.toMutableMap()) }
-            .toMutableList()
+        synchronized(lock) {
+            myState.agents = newAgents.map { it.deepCopy() }.toMutableList()
+        }
         ApplicationManager.getApplication().messageBus
             .syncPublisher(TOPIC)
             .onAgentsChanged(agents())
+    }
+
+    fun replaceAgent(agent: CliAgentDefinition) {
+        synchronized(lock) {
+            val index = myState.agents.indexOfFirst { it.id == agent.id }
+            if (index < 0) return
+            myState.agents[index] = agent.deepCopy()
+        }
     }
 
     fun resetToDefaults() {
         setAgents(defaultAgents())
     }
 
-    override fun getState(): State = myState
+    override fun getState(): State = synchronized(lock) {
+        State().apply {
+            agents = myState.agents.map { it.deepCopy() }.toMutableList()
+            autoApplyChanges = myState.autoApplyChanges
+            promptHistoryEnabled = myState.promptHistoryEnabled
+            confirmClipboardPlaceholder = myState.confirmClipboardPlaceholder
+        }
+    }
 
     override fun loadState(state: State) {
-        myState = state
-        if (myState.agents.isEmpty()) {
-            myState.agents = defaultAgents()
+        synchronized(lock) {
+            myState = state
+            if (myState.agents.isEmpty()) {
+                myState.agents = defaultAgents()
+            }
         }
     }
 
     override fun noStateLoaded() {
-        myState.agents = defaultAgents()
+        synchronized(lock) {
+            myState.agents = defaultAgents()
+        }
     }
 }

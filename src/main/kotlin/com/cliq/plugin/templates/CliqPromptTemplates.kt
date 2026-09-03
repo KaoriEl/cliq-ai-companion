@@ -5,8 +5,6 @@ import com.intellij.openapi.components.PersistentStateComponent
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.State
 import com.intellij.openapi.components.Storage
-import com.intellij.util.messages.Topic
-import java.util.EventListener
 
 @State(
     name = "CliqPromptTemplates",
@@ -19,13 +17,7 @@ class CliqPromptTemplates : PersistentStateComponent<CliqPromptTemplates.State> 
         var templates: MutableList<PromptTemplate> = mutableListOf()
     }
 
-    interface TemplatesListener : EventListener {
-        fun onTemplatesChanged(templates: List<PromptTemplate>)
-    }
-
     companion object {
-        val TOPIC: Topic<TemplatesListener> = Topic.create("Cliq Prompt Templates Changed", TemplatesListener::class.java)
-
         @JvmStatic
         fun getInstance(): CliqPromptTemplates =
             ApplicationManager.getApplication().getService(CliqPromptTemplates::class.java)
@@ -54,31 +46,41 @@ class CliqPromptTemplates : PersistentStateComponent<CliqPromptTemplates.State> 
         )
     }
 
+    private val lock = Any()
+
+    @Volatile
     private var myState = State()
 
-    fun templates(): List<PromptTemplate> = myState.templates.toList()
+    fun templates(): List<PromptTemplate> = synchronized(lock) {
+        myState.templates.map { it.copy() }
+    }
 
     fun setTemplates(newTemplates: List<PromptTemplate>) {
-        myState.templates = newTemplates.toMutableList()
-        ApplicationManager.getApplication().messageBus
-            .syncPublisher(TOPIC)
-            .onTemplatesChanged(templates())
+        synchronized(lock) {
+            myState.templates = newTemplates.map { it.copy() }.toMutableList()
+        }
     }
 
     fun addTemplate(template: PromptTemplate) {
         setTemplates(templates() + template)
     }
 
-    override fun getState(): State = myState
+    override fun getState(): State = synchronized(lock) {
+        State().apply { templates = myState.templates.map { it.copy() }.toMutableList() }
+    }
 
     override fun loadState(state: State) {
-        myState = state
-        if (myState.templates.isEmpty()) {
-            myState.templates = defaultTemplates()
+        synchronized(lock) {
+            myState = state
+            if (myState.templates.isEmpty()) {
+                myState.templates = defaultTemplates()
+            }
         }
     }
 
     override fun noStateLoaded() {
-        myState.templates = defaultTemplates()
+        synchronized(lock) {
+            myState.templates = defaultTemplates()
+        }
     }
 }

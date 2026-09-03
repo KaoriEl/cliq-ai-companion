@@ -2,15 +2,18 @@ package com.cliq.plugin.terminal
 
 import com.cliq.plugin.CliqPlugin
 import com.cliq.plugin.agents.CliAgentDefinition
-import com.cliq.plugin.util.CliPathEscaper
-import com.intellij.execution.configurations.GeneralCommandLine
+import com.cliq.plugin.settings.CliqAgentSecrets
+import com.cliq.plugin.settings.CliqSettings
+import com.cliq.plugin.util.ShellQuoting
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.Service
+import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.util.SystemInfo
+import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.util.execution.ParametersListUtil
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
@@ -31,10 +34,7 @@ class CliqTerminalLauncher(private val project: Project) {
             return
         }
 
-        val workDirectory = agent.workingDirectory.trim().ifBlank { project.basePath }
-        val shellCommand = buildShellCommand(agent, executable, workDirectory)
-
-        val terminalWindow = ToolWindowManager.getInstance(project).getToolWindow("Terminal")
+        val terminalWindow = ToolWindowManager.getInstance(project).getToolWindow(TERMINAL_TOOL_WINDOW_ID)
         if (terminalWindow == null) {
             notify(
                 "Terminal unavailable",
@@ -44,8 +44,38 @@ class CliqTerminalLauncher(private val project: Project) {
             return
         }
 
+        ApplicationManager.getApplication().executeOnPooledThread {
+            val prepared = agent.deepCopy()
+            if (CliqAgentSecrets.migrateLegacyValues(prepared)) {
+                CliqSettings.getInstance().replaceAgent(prepared)
+            }
+
+            val environment = CliqAgentSecrets.load(prepared)
+            val flavor = ShellQuoting.detect(project)
+            val arguments = ParametersListUtil.parse(prepared.argumentsTemplate)
+            val shellCommand = ShellQuoting.command(executable, arguments, flavor)
+            val workDirectory = prepared.workingDirectory.trim().ifBlank { project.basePath }
+
+            ApplicationManager.getApplication().invokeLater(
+                { startSession(terminalWindow, prepared, environment, shellCommand, workDirectory) },
+                ModalityState.any(),
+                project.disposed,
+            )
+        }
+    }
+
+    private fun startSession(
+        terminalWindow: ToolWindow,
+        agent: CliAgentDefinition,
+        environment: Map<String, String>,
+        shellCommand: String,
+        workDirectory: String?,
+    ) {
         terminalWindow.show {
             try {
+                val sessions = project.service<CliqTerminalSessions>()
+                sessions.requestSession(agent.displayName, environment)
+
                 val manager = TerminalToolWindowManager.getInstance(project)
                 val widget = manager.createShellWidget(
                     workDirectory ?: project.basePath,
@@ -53,13 +83,16 @@ class CliqTerminalLauncher(private val project: Project) {
                     true,
                     true,
                 )
-                ApplicationManager.getApplication().invokeLater {
-                    try {
-                        widget.sendCommandToExecute(shellCommand)
-                    } catch (t: Throwable) {
-                        log.warn("Failed to send command to widget", t)
-                    }
-                }
+                sessions.registerSession(widget)
+
+                ApplicationManager.getApplication().invokeLater(
+                    {
+                        runCatching { widget.sendCommandToExecute(shellCommand) }
+                            .onFailure { log.warn("Failed to send command to widget", it) }
+                    },
+                    ModalityState.any(),
+                    project.disposed,
+                )
             } catch (t: Throwable) {
                 log.warn("Failed to launch ${agent.displayName} via terminal", t)
                 notify(
@@ -71,32 +104,14 @@ class CliqTerminalLauncher(private val project: Project) {
         }
     }
 
-    private fun buildShellCommand(agent: CliAgentDefinition, executable: String, workDirectory: String?): String {
-        val commandLine = GeneralCommandLine(executable)
-        val arguments = ParametersListUtil.parse(agent.argumentsTemplate)
-        commandLine.addParameters(arguments)
-
-        return buildString {
-            append(environmentPrefix(agent.environmentVariables))
-            append(commandLine.commandLineString)
-        }
-    }
-
-    private fun environmentPrefix(environmentVariables: Map<String, String>): String {
-        if (environmentVariables.isEmpty()) return ""
-        return if (SystemInfo.isWindows) {
-            environmentVariables.entries.joinToString(separator = "") { (key, value) -> "set \"$key=$value\" && " }
-        } else {
-            environmentVariables.entries.joinToString(separator = " ", postfix = " ") { (key, value) ->
-                "$key=${CliPathEscaper.escape(value)}"
-            }
-        }
-    }
-
     private fun notify(title: String, content: String, type: NotificationType) {
         NotificationGroupManager.getInstance()
             .getNotificationGroup(CliqPlugin.NOTIFICATION_GROUP)
             .createNotification(title, content, type)
             .notify(project)
+    }
+
+    companion object {
+        const val TERMINAL_TOOL_WINDOW_ID = "Terminal"
     }
 }

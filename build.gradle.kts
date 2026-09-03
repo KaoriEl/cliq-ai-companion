@@ -51,7 +51,7 @@ intellijPlatform {
     pluginConfiguration {
         ideaVersion {
             sinceBuild.set("243")
-            untilBuild.set(provider { null })
+            untilBuild.set("252.*")
         }
         changeNotes.set("""
             This update adds a multi-file review queue, AI-drafted commit messages, prompt history, and smarter templates.<br>
@@ -69,6 +69,14 @@ intellijPlatform {
 
 tasks {
     buildSearchableOptions {
+        enabled = false
+    }
+
+    prepareJarSearchableOptions {
+        enabled = false
+    }
+
+    jarSearchableOptions {
         enabled = false
     }
 
