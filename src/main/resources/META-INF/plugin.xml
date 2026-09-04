@@ -13,6 +13,7 @@
 
     <depends>com.intellij.modules.platform</depends>
     <depends>org.jetbrains.plugins.terminal</depends>
+    <depends optional="true" config-file="cliq-vcs.xml">com.intellij.modules.vcs</depends>
 
     <extensions defaultExtensionNs="com.intellij">
         <applicationConfigurable
