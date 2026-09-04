@@ -15,6 +15,7 @@ import com.intellij.openapi.diagnostic.logger
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowManager
+import com.intellij.terminal.JBTerminalWidget
 import com.intellij.util.execution.ParametersListUtil
 import org.jetbrains.plugins.terminal.TerminalToolWindowManager
 
@@ -83,7 +84,10 @@ class CliqTerminalLauncher(private val project: Project) {
                     true,
                     true,
                 )
-                sessions.registerSession(widget)
+                // createShellWidget() returns the Terminal Gen2 TerminalWidget wrapper, not the
+                // JediTermWidget instance TerminalTyper finds by walking the tab's Swing tree.
+                // Register the unwrapped widget so identity checks in isCliqSession() succeed.
+                sessions.registerSession(JBTerminalWidget.asJediTermWidget(widget) ?: widget)
 
                 ApplicationManager.getApplication().invokeLater(
                     {

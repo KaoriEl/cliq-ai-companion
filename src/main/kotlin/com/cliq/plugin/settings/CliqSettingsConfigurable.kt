@@ -1,6 +1,7 @@
 package com.cliq.plugin.settings
 
 import com.cliq.plugin.agents.CliAgentDefinition
+import com.cliq.plugin.templates.PromptTemplateManagerDialog
 import com.intellij.icons.AllIcons
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
@@ -83,6 +84,15 @@ class CliqSettingsConfigurable : Configurable {
                 comment("History is stored per project in workspace.xml. Prompts built from the clipboard are never stored.")
             }
             row { cell(clipboardConfirm) }
+            separator()
+            row("Prompt Templates:") {
+                link("Manage prompt templates...") {
+                    PromptTemplateManagerDialog().show()
+                }
+            }
+            row {
+                comment("Add, edit, or remove the templates offered by the prompt picker in the chat input.")
+            }
             separator()
             row("Keyboard Shortcuts:") {
                 link("Configure shortcuts in Keymap...") {

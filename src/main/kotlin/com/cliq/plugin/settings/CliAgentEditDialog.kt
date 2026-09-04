@@ -6,6 +6,7 @@ import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.dsl.builder.Align
 import com.intellij.ui.dsl.builder.RowLayout
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
@@ -62,7 +63,8 @@ class CliAgentEditDialog(
         row("Environment variables:") {}
         row {
             cell(JBScrollPane(environmentArea))
-        }
+                .align(Align.FILL)
+        }.resizableRow()
         row {
             comment(
                 "One KEY=VALUE pair per line. Values are stored in the IDE password safe, " +

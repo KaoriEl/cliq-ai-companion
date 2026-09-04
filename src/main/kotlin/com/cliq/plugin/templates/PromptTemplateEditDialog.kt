@@ -5,6 +5,7 @@ import com.intellij.openapi.ui.ValidationInfo
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
+import com.intellij.ui.dsl.builder.Align
 import com.intellij.ui.dsl.builder.RowLayout
 import com.intellij.ui.dsl.builder.columns
 import com.intellij.ui.dsl.builder.panel
@@ -40,7 +41,8 @@ class PromptTemplateEditDialog(
         row("Content:") {}
         row {
             cell(JBScrollPane(contentArea))
-        }
+                .align(Align.FILL)
+        }.resizableRow()
         row {
             comment("The full prompt text inserted into the chat input. Supports {{activeFile}}, {{selection}}, and {{clipboard}} placeholders.")
         }

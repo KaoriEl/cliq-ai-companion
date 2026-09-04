@@ -11,11 +11,15 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.ui.content.Content
+import com.intellij.util.concurrency.AppExecutorUtil
 import com.jediterm.terminal.ui.JediTermWidget
 import java.awt.Component
 import java.awt.Container
+import java.util.concurrent.TimeUnit
 
 internal object TerminalTyper {
+
+    private const val SUBMIT_DELAY_MS = 60L
 
     private val log = logger<TerminalTyper>()
 
@@ -70,13 +74,15 @@ internal object TerminalTyper {
     private fun writeTo(widget: JediTermWidget, text: String, execute: Boolean) {
         try {
             val starter = widget.terminalStarter ?: return
-            val payload = buildString {
-                append("\u001B[200~")
-                append(text)
-                append("\u001B[201~")
-                if (execute) append("\r")
-            }
+            val payload = "\u001B[200~" + text + "\u001B[201~"
             starter.sendString(payload, false)
+
+            if (execute) {
+                AppExecutorUtil.getAppScheduledExecutorService().schedule(
+                    { runCatching { starter.sendString("\r", false) } },
+                    SUBMIT_DELAY_MS, TimeUnit.MILLISECONDS,
+                )
+            }
         } catch (e: Exception) {
             log.warn(e)
         }
