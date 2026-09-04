@@ -21,6 +21,7 @@ class CliqSettings : PersistentStateComponent<CliqSettings.State> {
         var autoApplyChanges: Boolean = false
         var promptHistoryEnabled: Boolean = true
         var confirmClipboardPlaceholder: Boolean = true
+        var commitMessagePromptTemplate: String = DEFAULT_COMMIT_MESSAGE_PROMPT_TEMPLATE
     }
 
     interface AgentsListener : EventListener {
@@ -29,6 +30,14 @@ class CliqSettings : PersistentStateComponent<CliqSettings.State> {
 
     companion object {
         val TOPIC: Topic<AgentsListener> = Topic.create("Cliq Agents Changed", AgentsListener::class.java)
+
+        const val COMMIT_DIFF_PLACEHOLDER = "{{diff}}"
+
+        const val DEFAULT_COMMIT_MESSAGE_PROMPT_TEMPLATE =
+            "Write a concise commit message for the following changes. " +
+                "Use the imperative mood for the summary line (max ~72 characters), " +
+                "followed by an optional short body explaining the why:\n\n" +
+                "```diff\n" + COMMIT_DIFF_PLACEHOLDER + "\n```"
 
         @JvmStatic
         fun getInstance(): CliqSettings =
@@ -76,6 +85,14 @@ class CliqSettings : PersistentStateComponent<CliqSettings.State> {
             synchronized(lock) { myState.confirmClipboardPlaceholder = value }
         }
 
+    var commitMessagePromptTemplate: String
+        get() = myState.commitMessagePromptTemplate
+        set(value) {
+            synchronized(lock) {
+                myState.commitMessagePromptTemplate = value.ifBlank { DEFAULT_COMMIT_MESSAGE_PROMPT_TEMPLATE }
+            }
+        }
+
     fun agents(): List<CliAgentDefinition> = synchronized(lock) {
         myState.agents.map { it.deepCopy() }
     }
@@ -107,6 +124,7 @@ class CliqSettings : PersistentStateComponent<CliqSettings.State> {
             autoApplyChanges = myState.autoApplyChanges
             promptHistoryEnabled = myState.promptHistoryEnabled
             confirmClipboardPlaceholder = myState.confirmClipboardPlaceholder
+            commitMessagePromptTemplate = myState.commitMessagePromptTemplate
         }
     }
 

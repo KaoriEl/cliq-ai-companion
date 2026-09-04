@@ -1,6 +1,7 @@
 package com.cliq.plugin.vcs
 
 import com.cliq.plugin.CliqPlugin
+import com.cliq.plugin.settings.CliqSettings
 import com.cliq.plugin.toolwindow.CliqPendingPrompt
 import com.cliq.plugin.toolwindow.CliqToolWindowPanel
 import com.intellij.notification.NotificationAction
@@ -108,13 +109,14 @@ class GenerateCommitMessageAction : AnAction() {
         return safeCut + TRUNCATION_NOTE
     }
 
-    private fun buildPrompt(diffText: String): String = buildString {
-        append("Write a concise commit message for the following changes. ")
-        append("Use the imperative mood for the summary line (max ~72 characters), ")
-        append("followed by an optional short body explaining the why:\n\n")
-        append("```diff\n")
-        append(diffText)
-        append("\n```")
+    private fun buildPrompt(diffText: String): String {
+        val template = CliqSettings.getInstance().commitMessagePromptTemplate
+        val diffBlock = "```diff\n$diffText\n```"
+        return if (template.contains(CliqSettings.COMMIT_DIFF_PLACEHOLDER)) {
+            template.replace(CliqSettings.COMMIT_DIFF_PLACEHOLDER, diffBlock)
+        } else {
+            "${template.trimEnd()}\n\n$diffBlock"
+        }
     }
 
     private fun deliverPrompt(project: Project, prompt: String) {

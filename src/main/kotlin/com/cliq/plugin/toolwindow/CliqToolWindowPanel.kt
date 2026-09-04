@@ -22,6 +22,8 @@ import com.intellij.ide.DataManager
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.actionSystem.ActionManager
+import com.intellij.openapi.actionSystem.ActionPlaces
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -29,6 +31,7 @@ import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.actionSystem.DataSink
 import com.intellij.openapi.actionSystem.DefaultActionGroup
 import com.intellij.openapi.actionSystem.UiDataProvider
+import com.intellij.openapi.actionSystem.impl.SimpleDataContext
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.components.service
@@ -482,6 +485,7 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
             val historyIcon = iconLabel(AllIcons.Vcs.History, "Insert a previously sent prompt")
             val templateIcon = iconLabel(AllIcons.Actions.ListFiles, "Insert prompt template")
             val saveTemplateIcon = iconLabel(AllIcons.Actions.MenuSaveall, "Save current input as prompt template")
+            val commitIcon = iconLabel(AllIcons.Actions.Commit, "Generate commit message from pending changes")
             val sendIcon = iconLabel(AllIcons.Actions.Execute, "Send prompt")
             sendIcon.border = JBUI.Borders.empty(0, 4, 8, 12)
 
@@ -490,6 +494,7 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
                 add(historyIcon)
                 add(templateIcon)
                 add(saveTemplateIcon)
+                add(commitIcon)
                 add(sendIcon)
             }
 
@@ -546,6 +551,7 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
             onClick(historyIcon) { showHistoryPopup(historyIcon) }
             onClick(templateIcon) { showTemplatePopup(templateIcon, basePath, getActiveFile) }
             onClick(saveTemplateIcon) { saveCurrentInputAsTemplate() }
+            onClick(commitIcon) { triggerGenerateCommitMessage() }
             onClick(sendIcon) { sendPrompt() }
 
             promptArea.addKeyListener(object : java.awt.event.KeyAdapter() {
@@ -571,6 +577,24 @@ class CliqToolWindowPanel(private val project: Project) : JBPanel<CliqToolWindow
     private fun insertTextIntoPrompt(text: String) {
         promptArea.replaceSelection(text)
         promptArea.requestFocusInWindow()
+    }
+
+    private fun triggerGenerateCommitMessage() {
+        val action = ActionManager.getInstance().getAction("com.cliq.plugin.GenerateCommitMessage")
+        if (action == null) {
+            NotificationGroupManager.getInstance()
+                .getNotificationGroup(CliqPlugin.NOTIFICATION_GROUP)
+                .createNotification(
+                    "Commit message generation unavailable",
+                    "This IDE does not expose the VCS module Cliq needs to build a diff.",
+                    NotificationType.WARNING,
+                )
+                .notify(project)
+            return
+        }
+        val dataContext = SimpleDataContext.builder().add(CommonDataKeys.PROJECT, project).build()
+        val event = AnActionEvent.createFromAnAction(action, null, ActionPlaces.TOOLWINDOW_CONTENT, dataContext)
+        action.actionPerformed(event)
     }
 
     private fun showHistoryPopup(anchor: JLabel) {

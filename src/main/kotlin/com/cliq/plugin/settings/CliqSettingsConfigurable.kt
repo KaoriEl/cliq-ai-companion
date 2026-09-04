@@ -11,6 +11,9 @@ import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.ConfigurationException
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.ui.ToolbarDecorator
+import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTextArea
+import com.intellij.ui.dsl.builder.Align
 import com.intellij.ui.dsl.builder.panel
 import com.intellij.ui.table.JBTable
 import com.intellij.util.ui.JBUI
@@ -33,6 +36,7 @@ class CliqSettingsConfigurable : Configurable {
     private var autoApplyBox: JCheckBox? = null
     private var promptHistoryBox: JCheckBox? = null
     private var clipboardConfirmBox: JCheckBox? = null
+    private var commitPromptArea: JBTextArea? = null
 
     override fun getDisplayName(): String = "Cliq"
 
@@ -74,6 +78,11 @@ class CliqSettingsConfigurable : Configurable {
             settings.confirmClipboardPlaceholder,
         ).also { clipboardConfirmBox = it }
 
+        val commitPromptField = JBTextArea(settings.commitMessagePromptTemplate, 6, 30).apply {
+            lineWrap = true
+            wrapStyleWord = true
+        }.also { commitPromptArea = it }
+
         val bottomPanel = panel {
             row { cell(autoApply) }
             row {
@@ -92,6 +101,23 @@ class CliqSettingsConfigurable : Configurable {
             }
             row {
                 comment("Add, edit, or remove the templates offered by the prompt picker in the chat input.")
+            }
+            separator()
+            row("Commit Message Prompt:") {}
+            row {
+                cell(JBScrollPane(commitPromptField))
+                    .align(Align.FILL)
+            }.resizableRow()
+            row {
+                comment(
+                    "Used by the commit-message icon above the chat input and by Tools → Cliq: Generate Commit " +
+                        "Message. Include ${CliqSettings.COMMIT_DIFF_PLACEHOLDER} where the diff should be inserted."
+                )
+            }
+            row {
+                link("Reset to default") {
+                    commitPromptField.text = CliqSettings.DEFAULT_COMMIT_MESSAGE_PROMPT_TEMPLATE
+                }
             }
             separator()
             row("Keyboard Shortcuts:") {
@@ -185,7 +211,8 @@ class CliqSettingsConfigurable : Configurable {
             pendingSecrets.isNotEmpty() ||
             autoApplyBox?.isSelected != settings.autoApplyChanges ||
             promptHistoryBox?.isSelected != settings.promptHistoryEnabled ||
-            clipboardConfirmBox?.isSelected != settings.confirmClipboardPlaceholder
+            clipboardConfirmBox?.isSelected != settings.confirmClipboardPlaceholder ||
+            commitPromptArea?.text != settings.commitMessagePromptTemplate
     }
 
     override fun apply() {
@@ -216,6 +243,8 @@ class CliqSettingsConfigurable : Configurable {
         settings.promptHistoryEnabled = promptHistoryBox?.isSelected ?: settings.promptHistoryEnabled
         settings.confirmClipboardPlaceholder =
             clipboardConfirmBox?.isSelected ?: settings.confirmClipboardPlaceholder
+        settings.commitMessagePromptTemplate =
+            commitPromptArea?.text ?: settings.commitMessagePromptTemplate
 
         ApplicationManager.getApplication().executeOnPooledThread {
             removedAgents.forEach { CliqAgentSecrets.forget(it.id, it.environmentKeys + it.environmentVariables.keys) }
@@ -237,6 +266,7 @@ class CliqSettingsConfigurable : Configurable {
         autoApplyBox?.isSelected = settings.autoApplyChanges
         promptHistoryBox?.isSelected = settings.promptHistoryEnabled
         clipboardConfirmBox?.isSelected = settings.confirmClipboardPlaceholder
+        commitPromptArea?.text = settings.commitMessagePromptTemplate
     }
 
     override fun disposeUIResources() {
@@ -246,5 +276,6 @@ class CliqSettingsConfigurable : Configurable {
         autoApplyBox = null
         promptHistoryBox = null
         clipboardConfirmBox = null
+        commitPromptArea = null
     }
 }
